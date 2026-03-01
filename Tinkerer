@@ -720,6 +720,50 @@ helpModeButton.MouseButton1Click:Connect(function()
     helpModeButton.Text = values.helpMode
 end)
 -- ============================================================
+-- 幫助目標邏輯（重構版）
+-- ============================================================
+
+-- 固定/跟隨迴圈：傳入已確認有效的 hrp/hum/tgt
+-- onRagdoll: ragdoll時傳虛空模式傳入 callback，被打後不重置傳 nil
+local function runPositionLoop(hrp, hum, tgt, onRagdoll)
+    while toggles.helpTarget do
+        if not (hrp and hrp.Parent) then break end
+        if hum.Health <= 0 then break end
+
+        local state = hum:GetState()
+        local isRagdoll = (state == Enum.HumanoidStateType.Ragdoll
+                        or state == Enum.HumanoidStateType.FallingDown
+                        or state == Enum.HumanoidStateType.Physics)
+
+        if isRagdoll and onRagdoll then
+            -- 停止固定，立刻傳到虛空
+            local pos = hrp.Position
+            pcall(function()
+                hrp.CFrame = CFrame.new(pos.X, -85, pos.Z)
+            end)
+            onRagdoll()
+            return
+        end
+
+        if not isRagdoll then
+            pcall(function()
+                if toggles.fixedPosition and values.fixedCFrame then
+                    hrp.CFrame = values.fixedCFrame
+                elseif not toggles.fixedPosition then
+                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                    if tgtRoot then
+                        local lookDir = tgtRoot.CFrame.LookVector
+                        local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
+                        hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
+                    end
+                end
+            end)
+        end
+
+        task.wait(0.05)
+    end
+end
+
 helpTargetButton.MouseButton1Click:Connect(function()
     toggles.helpTarget = not toggles.helpTarget
 
@@ -739,251 +783,111 @@ helpTargetButton.MouseButton1Click:Connect(function()
 
         connections.helpTarget = task.spawn(function()
 
-            local alreadyPositioned = false
-
-            while toggles.helpTarget do
-                if alreadyPositioned then
-                    task.wait(0.5)
-                    continue
+            -- 等待自己的角色存活（最多 timeout 秒）
+            local function waitForAliveCharacter(timeout)
+                local t = tick()
+                while tick() - t < (timeout or 15) do
+                    if not toggles.helpTarget then return nil, nil, nil end
+                    local c = player.Character
+                    if c then
+                        local hrp = c:FindFirstChild("HumanoidRootPart")
+                        local hum = c:FindFirstChildOfClass("Humanoid")
+                        if hrp and hum and hum.Health > 0 then
+                            return c, hrp, hum
+                        end
+                    end
+                    task.wait(0.2)
                 end
+                return nil, nil, nil
+            end
 
-                local character = player.Character
-                if not character then
-                    character = player.CharacterAdded:Wait()
-                end
-
-                local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 10)
-                local humanoid = character:WaitForChild("Humanoid", 10)
-
-                if not humanoidRootPart or not humanoid then
-                    task.wait(0.5)
-                    continue
-                end
-
-                if humanoid.Health <= 0 then
-                    task.wait(0.3)
-                    continue
-                end
-
+            -- 傳送到 Teleport1
+            local function teleportToLobby(hrp)
                 pcall(function()
-                    -- 先傳送到 Teleport1
-                    local teleport1 = Workspace.Lobby:FindFirstChild("Teleport1")
-                    if teleport1 and toggles.helpTarget then
-                        humanoidRootPart.CFrame = teleport1.CFrame
-                        task.wait(0.5)
-                    end
-
-                    local tgtPlayer = values.targetPlayer
-                    if not (tgtPlayer and tgtPlayer.Character and tgtPlayer.Character:FindFirstChild("HumanoidRootPart")) then
-                        return
-                    end
-
-                    if not toggles.helpTarget then return end
-
-                    if values.helpMode == "ragdoll時傳虛空" then
-                        -- --------------------------------------------------------
-                        -- ragdoll時傳虛空模式：
-                        -- 1. 初始定位到目標前方
-                        -- 2. 監測 ragdoll 狀態
-                        -- 3. 一旦進入 ragdoll → 把自己 Y 座標改為 -85（掉虛空死亡）
-                        -- 4. 等死亡後重生，等 0.5 秒 → 傳 Teleport1 → 等 0.5 秒 → 傳目標前方
-                        -- --------------------------------------------------------
-
-                        -- 初始定位
-                        pcall(function()
-                            local targetRoot = tgtPlayer.Character.HumanoidRootPart
-                            local lookDir = targetRoot.CFrame.LookVector
-                            local newPos = targetRoot.Position + (lookDir * values.helpDistance)
-                            local newCFrame = CFrame.new(newPos, newPos + lookDir)
-                            humanoidRootPart.CFrame = newCFrame
-                            if toggles.fixedPosition then
-                                values.fixedCFrame = newCFrame
-                            end
-                        end)
-
-                        -- 固定/跟隨 + ragdoll 偵測迴圈
-                        local ragdollDetected = false
-                        while toggles.helpTarget and not ragdollDetected do
-                            pcall(function()
-                                if not (humanoidRootPart and humanoidRootPart.Parent) then return end
-
-                                local state = humanoid:GetState()
-                                local isRagdoll = (state == Enum.HumanoidStateType.Ragdoll or
-                                                   state == Enum.HumanoidStateType.FallingDown or
-                                                   state == Enum.HumanoidStateType.Physics)
-
-                                if isRagdoll then
-                                    -- 觸發虛空傳送
-                                    ragdollDetected = true
-                                    local currentPos = humanoidRootPart.Position
-                                    humanoidRootPart.CFrame = CFrame.new(currentPos.X, -85, currentPos.Z)
-                                    return
-                                end
-
-                                -- 正常固定或跟隨
-                                if toggles.fixedPosition and values.fixedCFrame then
-                                    humanoidRootPart.CFrame = values.fixedCFrame
-                                elseif not toggles.fixedPosition then
-                                    local targetRoot = tgtPlayer.Character and tgtPlayer.Character:FindFirstChild("HumanoidRootPart")
-                                    if targetRoot then
-                                        local lookDir = targetRoot.CFrame.LookVector
-                                        local newPos = targetRoot.Position + (lookDir * values.helpDistance)
-                                        humanoidRootPart.CFrame = CFrame.new(newPos, newPos + lookDir)
-                                    end
-                                end
-                            end)
-                            task.wait(0.1)
-                        end
-
-                        if ragdollDetected and toggles.helpTarget then
-                            -- 等待死亡
-                            local t0 = tick()
-                            repeat task.wait(0.2)
-                            until not player.Character or
-                                  (player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health <= 0)
-                                  or tick()-t0 > 5
-
-                            -- 等待新角色重生
-                            local newCharacter = nil
-                            local t1 = tick()
-                            repeat
-                                task.wait(0.2)
-                                newCharacter = player.Character
-                            until (newCharacter and newCharacter:FindFirstChild("HumanoidRootPart") and
-                                  newCharacter:FindFirstChild("Humanoid") and newCharacter.Humanoid.Health > 0)
-                                  or tick()-t1 > 10
-
-                            if not toggles.helpTarget then return end
-
-                            -- 重生後等 0.5 秒
-                            task.wait(0.5)
-
-                            if not toggles.helpTarget then return end
-
-                            -- 傳送到 Teleport1
-                            pcall(function()
-                                local newHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                                local tp1 = Workspace.Lobby:FindFirstChild("Teleport1")
-                                if newHRP and tp1 then
-                                    newHRP.CFrame = tp1.CFrame
-                                end
-                            end)
-
-                            -- 等 0.5 秒
-                            task.wait(0.5)
-
-                            if not toggles.helpTarget then return end
-
-                            -- 傳送到目標前方
-                            pcall(function()
-                                local newHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                                if not newHRP then return end
-                                local tgt = values.targetPlayer
-                                if tgt and tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart") then
-                                    local targetRoot = tgt.Character.HumanoidRootPart
-                                    local lookDir = targetRoot.CFrame.LookVector
-                                    local newPos = targetRoot.Position + (lookDir * values.helpDistance)
-                                    local newCFrame = CFrame.new(newPos, newPos + lookDir)
-                                    newHRP.CFrame = newCFrame
-                                    values.fixedCFrame = newCFrame
-                                end
-                            end)
-
-                            -- alreadyPositioned 保持 false，讓外層 while 重新迭代（但下次直接跳過 Teleport1，因為剛傳過了）
-                            -- 實際上外層會再跑一次，但我們已手動完成所有步驟
-                            -- 設定 alreadyPositioned = true，防止外層再次傳 Teleport1
-                            alreadyPositioned = true
-
-                            -- 進入固定/跟隨的永久迴圈（新角色）
-                            local newChar = player.Character
-                            if not newChar then return end
-                            local newHRP = newChar:FindFirstChild("HumanoidRootPart")
-                            local newHum = newChar:FindFirstChild("Humanoid")
-                            if not newHRP or not newHum then return end
-
-                            -- 重新進入 ragdoll 偵測迴圈
-                            local ragdollDetected2 = false
-                            while toggles.helpTarget and not ragdollDetected2 do
-                                pcall(function()
-                                    if not (newHRP and newHRP.Parent) then return end
-                                    local state = newHum:GetState()
-                                    local isRagdoll = (state == Enum.HumanoidStateType.Ragdoll or
-                                                       state == Enum.HumanoidStateType.FallingDown or
-                                                       state == Enum.HumanoidStateType.Physics)
-
-                                    if isRagdoll then
-                                        ragdollDetected2 = true
-                                        local currentPos = newHRP.Position
-                                        newHRP.CFrame = CFrame.new(currentPos.X, -85, currentPos.Z)
-                                        return
-                                    end
-
-                                    if toggles.fixedPosition and values.fixedCFrame then
-                                        newHRP.CFrame = values.fixedCFrame
-                                    elseif not toggles.fixedPosition then
-                                        local tgt = values.targetPlayer
-                                        local targetRoot = tgt and tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                                        if targetRoot then
-                                            local lookDir = targetRoot.CFrame.LookVector
-                                            local newPos = targetRoot.Position + (lookDir * values.helpDistance)
-                                            newHRP.CFrame = CFrame.new(newPos, newPos + lookDir)
-                                        end
-                                    end
-                                end)
-                                task.wait(0.1)
-                            end
-
-                            -- 若再次 ragdoll，重置 alreadyPositioned 讓外層重新走完整流程
-                            if ragdollDetected2 then
-                                alreadyPositioned = false
-                            end
-                        end
-
-                    else
-                        -- --------------------------------------------------------
-                        -- 被打後不重置模式（原始行為）
-                        -- --------------------------------------------------------
-
-                        pcall(function()
-                            local targetRoot = tgtPlayer.Character.HumanoidRootPart
-                            local lookDir = targetRoot.CFrame.LookVector
-                            local newPos = targetRoot.Position + (lookDir * values.helpDistance)
-                            local newCFrame = CFrame.new(newPos, newPos + lookDir)
-                            humanoidRootPart.CFrame = newCFrame
-                            values.fixedCFrame = newCFrame
-                        end)
-
-                        alreadyPositioned = true
-
-                        while toggles.helpTarget do
-                            pcall(function()
-                                if not (humanoidRootPart and humanoidRootPart.Parent) then return end
-
-                                local state = humanoid:GetState()
-                                local isRagdoll = (state == Enum.HumanoidStateType.Ragdoll or
-                                                   state == Enum.HumanoidStateType.FallingDown or
-                                                   state == Enum.HumanoidStateType.Physics)
-
-                                if toggles.fixedPosition then
-                                    if not isRagdoll and values.fixedCFrame then
-                                        humanoidRootPart.CFrame = values.fixedCFrame
-                                    end
-                                else
-                                    local targetRoot = tgtPlayer.Character and tgtPlayer.Character:FindFirstChild("HumanoidRootPart")
-                                    if targetRoot then
-                                        local lookDir = targetRoot.CFrame.LookVector
-                                        local newPos = targetRoot.Position + (lookDir * values.helpDistance)
-                                        humanoidRootPart.CFrame = CFrame.new(newPos, newPos + lookDir)
-                                    end
-                                end
-                            end)
-                            task.wait(0.1)
-                        end
+                    local tp1 = Workspace.Lobby:FindFirstChild("Teleport1")
+                    if tp1 and hrp and hrp.Parent then
+                        hrp.CFrame = tp1.CFrame
                     end
                 end)
+            end
 
-                if toggles.helpTarget and not alreadyPositioned then
-                    task.wait(0.5)
+            -- 傳送到目標前方並儲存 fixedCFrame
+            local function teleportToTarget(hrp, tgt)
+                pcall(function()
+                    if not (hrp and hrp.Parent) then return end
+                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                    if tgtRoot then
+                        local lookDir = tgtRoot.CFrame.LookVector
+                        local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
+                        local newCFrame = CFrame.new(newPos, newPos + lookDir)
+                        hrp.CFrame = newCFrame
+                        values.fixedCFrame = newCFrame
+                    end
+                end)
+            end
+
+            -- ── 主流程（每次死亡/重生後從頭跑）──
+            while toggles.helpTarget do
+                local tgt = values.targetPlayer
+
+                local _, hrp, hum = waitForAliveCharacter(15)
+                if not hrp then task.wait(0.5) continue end
+                if not toggles.helpTarget then break end
+
+                -- 1. 傳 Teleport1
+                teleportToLobby(hrp)
+                task.wait(0.5)
+                if not toggles.helpTarget then break end
+
+                -- 2. 傳目標前方
+                teleportToTarget(hrp, tgt)
+                if not toggles.helpTarget then break end
+
+                if values.helpMode == "被打後不重置" then
+                    -- 永久固定/跟隨，不偵測 ragdoll
+                    -- 只有 hrp 消失（死亡）或手動解除才結束
+                    runPositionLoop(hrp, hum, tgt, nil)
+
+                else
+                    -- ragdoll 偵測，觸發後傳虛空
+                    local ragdollFired = false
+                    runPositionLoop(hrp, hum, tgt, function()
+                        ragdollFired = true
+                    end)
+
+                    if not toggles.helpTarget then break end
+
+                    if ragdollFired then
+                        -- 等自己死亡（最多 8 秒）
+                        local t0 = tick()
+                        while tick() - t0 < 8 do
+                            task.wait(0.1)
+                            local c = player.Character
+                            if not c then break end
+                            local h = c:FindFirstChildOfClass("Humanoid")
+                            if not h or h.Health <= 0 then break end
+                        end
+
+                        if not toggles.helpTarget then break end
+
+                        -- 等重生（最多 15 秒）
+                        local _, newHrp, _ = waitForAliveCharacter(15)
+                        if not newHrp then continue end
+                        if not toggles.helpTarget then break end
+
+                        -- 重生後等 0.5 秒
+                        task.wait(0.5)
+                        if not toggles.helpTarget then break end
+
+                        -- 傳 Teleport1
+                        teleportToLobby(newHrp)
+                        task.wait(0.5)
+                        if not toggles.helpTarget then break end
+
+                        -- 傳目標前方，然後外層 while 繼續下一輪
+                        teleportToTarget(newHrp, tgt)
+                    end
+                    -- ragdollFired = false 表示自然死亡，外層 while 重新等角色
                 end
             end
         end)
