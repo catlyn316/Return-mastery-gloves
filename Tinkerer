@@ -1,4 +1,4 @@
--- 貓玲的修理工精通腳本 v1.0
+-- 貓玲的修理工精通腳本 v1.1
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -725,15 +725,23 @@ end)
 
 -- 固定/跟隨迴圈：傳入已確認有效的 hrp/hum/tgt
 -- onRagdoll: ragdoll時傳虛空模式傳入 callback，被打後不重置傳 nil
+-- 用 Workspace[playerName].Ragdolled（BoolValue）判斷是否進入 ragdoll
 local function runPositionLoop(hrp, hum, tgt, onRagdoll)
     while toggles.helpTarget do
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        local state = hum:GetState()
-        local isRagdoll = (state == Enum.HumanoidStateType.Ragdoll
-                        or state == Enum.HumanoidStateType.FallingDown
-                        or state == Enum.HumanoidStateType.Physics)
+        -- 讀取遊戲的 Ragdolled BoolValue
+        local isRagdoll = false
+        pcall(function()
+            local folder = Workspace:FindFirstChild(player.Name)
+            if folder then
+                local ragdolledVal = folder:FindFirstChild("Ragdolled")
+                if ragdolledVal then
+                    isRagdoll = ragdolledVal.Value == true
+                end
+            end
+        end)
 
         if isRagdoll and onRagdoll then
             -- 停止固定，立刻傳到虛空
