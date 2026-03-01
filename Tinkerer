@@ -1,4 +1,4 @@
--- 貓玲的修理工精通腳本 v1.1
+-- 貓玲的修理工精通腳本 v1.2
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -17,6 +17,7 @@ local toggles = {
     autoAttack = false,
     autoAbility = false,
     jumpPower = false,
+    attackerFixed = false,
     helpTarget = false,
     fixedPosition = true,
 }
@@ -37,6 +38,7 @@ local connections = {
     autoAttack = nil,
     autoAbility = nil,
     jumpPower = nil,
+    attackerFixed = nil,
     helpTarget = nil,
     fixedPosition = nil,
 }
@@ -353,8 +355,11 @@ local autoAbilityFrame, autoAbilityStatus, autoAbilityButton = createControlRow(
 -- 使用能力間隔
 local abilityIntervalFrame, abilityIntervalInput = createInputRow(page1, "能力間隔:", "0.5", "秒", 5)
 
+-- 攻擊者固定位置
+local attackerFixedFrame, attackerFixedStatus, attackerFixedButton = createControlRow(page1, "固定位置:", "", false, 6)
+
 -- 跳躍力
-local jumpPowerFrame, jumpPowerInput, jumpPowerButton = createControlRow(page1, "跳躍力:", "50", true, 6)
+local jumpPowerFrame, jumpPowerInput, jumpPowerButton = createControlRow(page1, "跳躍力:", "50", true, 7)
 
 -- ============================================================
 -- 頁面2：幫助者
@@ -710,7 +715,43 @@ jumpPowerButton.MouseButton1Click:Connect(function()
     toggleUIState(jumpPowerButton, jumpPowerFrame, jumpPowerInput, toggles.jumpPower)
 end)
 
--- 幫助模式切換
+-- 攻擊者固定位置
+attackerFixedButton.MouseButton1Click:Connect(function()
+    toggles.attackerFixed = not toggles.attackerFixed
+
+    if toggles.attackerFixed then
+        -- 記錄當前位置和朝向
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local lockedCFrame = hrp.CFrame
+            attackerFixedStatus.Text = "固定中"
+            attackerFixedStatus.TextColor3 = THEME.primaryDark
+
+            connections.attackerFixed = RunService.Heartbeat:Connect(function()
+                if not toggles.attackerFixed then return end
+                local c = player.Character
+                local h = c and c:FindFirstChild("HumanoidRootPart")
+                if h then
+                    pcall(function() h.CFrame = lockedCFrame end)
+                end
+            end)
+        else
+            -- 沒有角色，取消
+            toggles.attackerFixed = false
+            return
+        end
+    else
+        attackerFixedStatus.Text = "關閉"
+        attackerFixedStatus.TextColor3 = THEME.textMuted
+        if connections.attackerFixed then
+            connections.attackerFixed:Disconnect()
+            connections.attackerFixed = nil
+        end
+    end
+
+    toggleUIState(attackerFixedButton, attackerFixedFrame, attackerFixedStatus, toggles.attackerFixed)
+end)
 helpModeButton.MouseButton1Click:Connect(function()
     if values.helpMode == "被打後不重置" then
         values.helpMode = "ragdoll時傳虛空"
@@ -723,10 +764,37 @@ end)
 -- 幫助目標邏輯（重構版）
 -- ============================================================
 
--- 固定/跟隨迴圈：傳入已確認有效的 hrp/hum/tgt
--- onRagdoll: ragdoll時傳虛空模式傳入 callback，被打後不重置傳 nil
--- 用 Workspace[playerName].Ragdolled（BoolValue）判斷是否進入 ragdoll
-local function runPositionLoop(hrp, hum, tgt, onRagdoll)
+-- ============================================================
+-- 位置迴圈：被打後不重置模式
+-- 最短間隔，ragdoll 時也繼續強制傳送回固定位置/目標
+-- ============================================================
+local function runPositionLoopNoReset(hrp, hum, tgt)
+    while toggles.helpTarget do
+        if not (hrp and hrp.Parent) then break end
+        if hum.Health <= 0 then break end
+
+        pcall(function()
+            if toggles.fixedPosition and values.fixedCFrame then
+                hrp.CFrame = values.fixedCFrame
+            elseif not toggles.fixedPosition then
+                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                if tgtRoot then
+                    local lookDir = tgtRoot.CFrame.LookVector
+                    local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
+                    hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
+                end
+            end
+        end)
+
+        task.wait()  -- 最短間隔（一個 Heartbeat frame）
+    end
+end
+
+-- ============================================================
+-- 位置迴圈：ragdoll時傳虛空模式
+-- 0.05s 間隔，偵測到 Workspace[name].Ragdolled = true 就傳到 Y=-85
+-- ============================================================
+local function runPositionLoopRagdollVoid(hrp, hum, tgt, onRagdoll)
     while toggles.helpTarget do
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
@@ -743,8 +811,8 @@ local function runPositionLoop(hrp, hum, tgt, onRagdoll)
             end
         end)
 
-        if isRagdoll and onRagdoll then
-            -- 停止固定，立刻傳到虛空
+        if isRagdoll then
+            -- 立刻傳到虛空
             local pos = hrp.Position
             pcall(function()
                 hrp.CFrame = CFrame.new(pos.X, -85, pos.Z)
@@ -753,20 +821,19 @@ local function runPositionLoop(hrp, hum, tgt, onRagdoll)
             return
         end
 
-        if not isRagdoll then
-            pcall(function()
-                if toggles.fixedPosition and values.fixedCFrame then
-                    hrp.CFrame = values.fixedCFrame
-                elseif not toggles.fixedPosition then
-                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                    if tgtRoot then
-                        local lookDir = tgtRoot.CFrame.LookVector
-                        local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
-                        hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
-                    end
+        -- 正常固定或跟隨（非 ragdoll 狀態）
+        pcall(function()
+            if toggles.fixedPosition and values.fixedCFrame then
+                hrp.CFrame = values.fixedCFrame
+            elseif not toggles.fixedPosition then
+                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                if tgtRoot then
+                    local lookDir = tgtRoot.CFrame.LookVector
+                    local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
+                    hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
                 end
-            end)
-        end
+            end
+        end)
 
         task.wait(0.05)
     end
@@ -852,14 +919,13 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 if not toggles.helpTarget then break end
 
                 if values.helpMode == "被打後不重置" then
-                    -- 永久固定/跟隨，不偵測 ragdoll
-                    -- 只有 hrp 消失（死亡）或手動解除才結束
-                    runPositionLoop(hrp, hum, tgt, nil)
+                    -- 永久固定/跟隨，ragdoll 時也強制傳回，最短間隔
+                    runPositionLoopNoReset(hrp, hum, tgt)
 
                 else
                     -- ragdoll 偵測，觸發後傳虛空
                     local ragdollFired = false
-                    runPositionLoop(hrp, hum, tgt, function()
+                    runPositionLoopRagdollVoid(hrp, hum, tgt, function()
                         ragdollFired = true
                     end)
 
@@ -1058,7 +1124,7 @@ player.CharacterAdded:Connect(function()
     if toggles.jumpPower then getOriginalJumpPower() end
 end)
 
-print("貓玲的修理工精通腳本 v1.1 已載入!")
+print("貓玲的修理工精通腳本 v1.2 已載入!")
 print("主要功能:")
 print("1. 自動攻擊: 每N秒 TinkererHit:FireServer(目標[Right Arm])")
 print("2. 自動使用能力: 每N秒 GeneralAbility:FireServer(E_ABILITY)")
