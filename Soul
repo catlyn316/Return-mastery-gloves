@@ -1,4 +1,4 @@
--- 貓玲的靈魂精通腳本 v0.2
+-- 貓玲的靈魂精通腳本 v0.3
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -1229,7 +1229,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的靈魂精通腳本 v0.2 已載入!")
+print("貓玲的靈魂精通腳本 v0.3 已載入!")
 print("攻擊者功能:")
 print("  第一三任務: souls<100→GeneralHit | souls>=100→GeneralAbility(true)")
 print("  第二任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
