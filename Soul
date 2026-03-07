@@ -1,4 +1,4 @@
--- 貓玲的靈魂精通腳本 v0.7
+-- 貓玲的靈魂精通腳本 v0.9
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -812,25 +812,11 @@ local function runQuest4()
                 end)
 
                 if slapsAfter <= slapsBefore then
-                    -- Slaps 沒變，補打：模擬點擊畫面中央
+                    -- Slaps 沒變，直接再補打一次
                     pcall(function()
-                        local screenCenter = Vector2.new(
-                            workspace.CurrentCamera.ViewportSize.X / 2,
-                            workspace.CurrentCamera.ViewportSize.Y / 2
-                        )
-                        -- 判斷裝置類型
-                        if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
-                            -- 手機/平板：模擬 touch
-                            local vgi = Instance.new("InputObject")
-                            vgi.UserInputType = Enum.UserInputType.Touch
-                            vgi.UserInputState = Enum.UserInputState.Begin
-                            vgi.Position = Vector3.new(screenCenter.X, screenCenter.Y, 0)
-                            UserInputService:SendSimulatedMouseOrTouchEvent(screenCenter, Enum.UserInputType.Touch)
-                        else
-                            -- 電腦：模擬滑鼠點擊
-                            mouse1click()
-                        end
+                        ReplicatedStorage.GeneralHit:FireServer(torso)
                     end)
+                    task.wait(0.3)
                 end
 
                 task.wait(0.05)
@@ -911,10 +897,16 @@ helpModeButton.MouseButton1Click:Connect(function()
         values.helpMode = "被打後不重置"
         helpModeButton.Text = "被打後不重置"
         helpModeButton.BackgroundColor3 = Color3.fromRGB(150, 80, 180)
+        -- 切換到被打後不重置：預設距離改 10
+        values.helpDistance = 10
+        helpDistanceInput.Text = "10"
     else
         values.helpMode = "被blast時重置"
         helpModeButton.Text = "被blast時重置"
         helpModeButton.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+        -- 切換到被blast時重置：預設距離改 5
+        values.helpDistance = 5
+        helpDistanceInput.Text = "5"
     end
 end)
 
@@ -946,6 +938,29 @@ fixedPosHelpButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
+-- 共用：偵測 blast/aoe_blast 在 50 單位內並傳送到自己位置
+-- ============================================================
+local function pullNearbyBlast(hrp)
+    pcall(function()
+        local myPos = hrp.Position
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj.Name == "blast" or obj.Name == "aoe_blast" then
+                local objPart
+                if obj:IsA("BasePart") then
+                    objPart = obj
+                elseif obj:IsA("Model") and obj.PrimaryPart then
+                    objPart = obj.PrimaryPart
+                end
+                if objPart and (objPart.Position - myPos).Magnitude <= 50 then
+                    objPart.CFrame = CFrame.new(myPos)
+                    break
+                end
+            end
+        end
+    end)
+end
+
+-- ============================================================
 -- 幫助者位置迴圈：被打後不重置
 -- ============================================================
 local function runHelpLoopNoReset(hrp, hum, tgt)
@@ -965,6 +980,9 @@ local function runHelpLoopNoReset(hrp, hum, tgt)
                 end
             end
         end)
+
+        -- 偵測並拉近 blast
+        pullNearbyBlast(hrp)
 
         task.wait()
     end
@@ -1029,6 +1047,9 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
                 end
             end
         end)
+
+        -- 偵測並拉近 blast
+        pullNearbyBlast(hrp)
 
         -- ragdoll 中：判斷是否需要重置
         if isSelfRagdoll() then
@@ -1277,7 +1298,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的靈魂精通腳本 v0.7 已載入!")
+print("貓玲的靈魂精通腳本 v0.9 已載入!")
 print("攻擊者功能:")
 print("  第一三任務: souls<100→GeneralHit | souls>=100→GeneralAbility(true)")
 print("  第二任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
