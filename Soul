@@ -1,4 +1,4 @@
--- 貓玲的靈魂精通腳本 v0.9
+-- 貓玲的靈魂精通腳本 v1.0
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -830,27 +830,48 @@ local function runQuest4()
 
                 if not toggles.attacker then break end
 
+                -- 發動能力前：確認幫助者非 ragdoll 且在自己正前方（最多等 8 秒）
+                local myChar2 = player.Character
+                local myHrp2 = myChar2 and myChar2:FindFirstChild("HumanoidRootPart")
+                local helper = nil
+                if myHrp2 then
+                    local minDist2 = math.huge
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                            local d = (p.Character.HumanoidRootPart.Position - myHrp2.Position).Magnitude
+                            if d < minDist2 then minDist2 = d; helper = p end
+                        end
+                    end
+                end
+
+                if helper then
+                    local helperTimeout = tick() + 8
+                    while toggles.attacker and tick() < helperTimeout do
+                        local c2 = player.Character
+                        local h2 = c2 and c2:FindFirstChild("HumanoidRootPart")
+                        local hc = helper.Character
+                        local hhrp = hc and hc:FindFirstChild("HumanoidRootPart")
+                        if h2 and hhrp and not isPlayerRagdoll(helper) then
+                            -- 判斷幫助者是否在正前方：dot product > 0.5（約 60 度內）
+                            local toHelper = (hhrp.Position - h2.Position).Unit
+                            local forward = h2.CFrame.LookVector
+                            if toHelper:Dot(forward) > 0.5 then break end
+                        end
+                        task.wait(0.05)
+                    end
+                end
+
+                if not toggles.attacker then break end
+
                 -- 發動能力
                 pcall(function()
                     ReplicatedStorage.GeneralAbility:FireServer(false)
                 end)
 
-                -- 等幫助者（最近玩家）從 ragdoll 恢復後再繼續（最多等 8 秒）
-                local helper = nil
-                local myChar = player.Character
-                local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
-                if myHrp then
-                    local minDist2 = math.huge
-                    for _, p in ipairs(Players:GetPlayers()) do
-                        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                            local d = (p.Character.HumanoidRootPart.Position - myHrp.Position).Magnitude
-                            if d < minDist2 then minDist2 = d; helper = p end
-                        end
-                    end
-                end
+                -- 等幫助者從 ragdoll 恢復後再繼續（最多等 8 秒）
                 if helper then
-                    local helperTimeout = tick() + 8
-                    while toggles.attacker and tick() < helperTimeout do
+                    local helperTimeout2 = tick() + 8
+                    while toggles.attacker and tick() < helperTimeout2 do
                         if not isPlayerRagdoll(helper) then break end
                         task.wait(0.05)
                     end
@@ -938,22 +959,44 @@ fixedPosHelpButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 共用：偵測 blast/aoe_blast 在 50 單位內並傳送到自己位置
+-- 共用：偵測 blast 在 50 單位內，持續把 blast 下所有部件傳到自己位置直到消失
 -- ============================================================
+local activeBlastLoops = {}  -- 追蹤已在處理的 blast，避免重複
+
 local function pullNearbyBlast(hrp)
     pcall(function()
         local myPos = hrp.Position
         for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj.Name == "blast" or obj.Name == "aoe_blast" then
-                local objPart
+            if obj.Name == "blast" and not activeBlastLoops[obj] then
+                -- 找代表位置的 part
+                local refPart
                 if obj:IsA("BasePart") then
-                    objPart = obj
+                    refPart = obj
                 elseif obj:IsA("Model") and obj.PrimaryPart then
-                    objPart = obj.PrimaryPart
+                    refPart = obj.PrimaryPart
                 end
-                if objPart and (objPart.Position - myPos).Magnitude <= 50 then
-                    objPart.CFrame = CFrame.new(myPos)
-                    break
+                if refPart and (refPart.Position - myPos).Magnitude <= 50 then
+                    activeBlastLoops[obj] = true
+                    -- 用 task.spawn 持續追蹤這個 blast 直到消失
+                    task.spawn(function()
+                        while obj and obj.Parent and hrp and hrp.Parent and toggles.helpTarget do
+                            local target = hrp.Position
+                            pcall(function()
+                                -- 把 blast 下所有 BasePart 都傳到自己位置
+                                if obj:IsA("BasePart") then
+                                    obj.CFrame = CFrame.new(target)
+                                elseif obj:IsA("Model") then
+                                    for _, part in ipairs(obj:GetDescendants()) do
+                                        if part:IsA("BasePart") then
+                                            part.CFrame = CFrame.new(target)
+                                        end
+                                    end
+                                end
+                            end)
+                            task.wait()
+                        end
+                        activeBlastLoops[obj] = nil
+                    end)
                 end
             end
         end
@@ -1298,7 +1341,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的靈魂精通腳本 v0.9 已載入!")
+print("貓玲的靈魂精通腳本 v1.0 已載入!")
 print("攻擊者功能:")
 print("  第一三任務: souls<100→GeneralHit | souls>=100→GeneralAbility(true)")
 print("  第二任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
