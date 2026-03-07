@@ -1,4 +1,4 @@
--- 貓玲的憤怒精通腳本 v0.5
+-- 貓玲的憤怒精通腳本 v0.6
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -28,6 +28,7 @@ local toggles = {
 
 local values = {
     minRage       = 70,
+    attackInterval = 0.8,
     helpDistance  = 5,
     helpMode      = "被打時重置",  -- "被打時重置" | "被打後不重置"
     targetPlayer  = nil,
@@ -432,11 +433,14 @@ end
 -- 自動攻擊開關
 local attackerFrame, attackerStatus, attackerButton = createRow(page1, "自動攻擊:", "關閉", "啟動", 1)
 
+-- 攻擊間隔輸入
+local attackIntervalFrame, attackIntervalInput = createInputRow(page1, "攻擊間隔:", "0.8", "秒", 2)
+
 -- 固定位置
-local fixedPosFrame, fixedPosStatus, fixedPosButton = createRow(page1, "固定位置:", "關閉", "啟動", 2)
+local fixedPosFrame, fixedPosStatus, fixedPosButton = createRow(page1, "固定位置:", "關閉", "啟動", 3)
 
 -- 最低憤怒值輸入
-local minRageFrame, minRageInput = createInputRow(page1, "最低憤怒值:", "70", "%", 3)
+local minRageFrame, minRageInput = createInputRow(page1, "最低憤怒值:", "70", "%", 4)
 
 -- ============================================================
 -- 頁面2：幫助者
@@ -614,15 +618,41 @@ minRageInput.FocusLost:Connect(function()
     end
 end)
 
+-- 攻擊間隔輸入
+attackIntervalInput.FocusLost:Connect(function()
+    local val = tonumber(attackIntervalInput.Text)
+    if val and val > 0 then
+        values.attackInterval = val
+    else
+        attackIntervalInput.Text = tostring(values.attackInterval)
+    end
+end)
+
 -- ============================================================
 -- 攻擊者主邏輯
--- 階段A（rage 從 0 爬到 100）：每 0.8s 打一次 GRRRR
+-- 階段A（rage 從 0 爬到 100）：每 attackInterval 秒打一次
 -- 階段B（rage == 100）：發動 frenzy，進入 frenzy 循環
--- 階段C（frenzy 中）：rage <= minRage 時立刻打一次，等 rage 再次 <= minRage 才繼續
---   → rage 降到 0 後重新進入階段A（0.8s 攻擊），rage 回到 100 再次發動 frenzy
+-- 階段C（frenzy 中）：
+--   rage <= minRage 且 20 單位內有人 → 打一次，等 rage 回到 minRage 以上
+--   rage == 0（降過頭）→ 每 attackInterval 秒打直到 rage 回到 minRage
+--   rage 回到 0 後再爬到 100 → 重新發動 frenzy
 -- ============================================================
+local function hasTargetNearby()
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return false end
+    local myPos = char.HumanoidRootPart.Position
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            if (p.Character.HumanoidRootPart.Position - myPos).Magnitude <= 20 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function runAttackerLoop()
-    local frenzyActive = false  -- 是否已發動過 frenzy（在 rage 降到 0 前持續有效）
+    local frenzyActive = false
 
     while toggles.attacker do
         local char = player.Character
@@ -631,22 +661,18 @@ local function runAttackerLoop()
         local rage = getSelfAttr("rage_percent") or 0
 
         if not frenzyActive then
-            -- 【階段A】rage 從 0 爬到 100，每 0.8s 攻擊一次
+            -- 【階段A】rage 從 0 爬到 100，每 attackInterval 秒攻擊一次
             if rage < 100 then
                 local leftArm = getNearestTargetLeftArm()
                 if leftArm then
-                    pcall(function()
-                        ReplicatedStorage.GRRRR:FireServer(leftArm)
-                    end)
+                    pcall(function() ReplicatedStorage.GRRRR:FireServer(leftArm) end)
                 end
-                task.wait(0.8)
+                task.wait(values.attackInterval)
             else
-                -- rage 到 100，發動 frenzy，切換到 frenzy 模式
-                pcall(function()
-                    ReplicatedStorage.GRRRRR:FireServer("frenzy")
-                end)
+                -- rage 到 100，發動 frenzy
+                pcall(function() ReplicatedStorage.GRRRRR:FireServer("frenzy") end)
                 frenzyActive = true
-                -- 等 rage 開始下降（離開 100）再進入 frenzy 循環
+                -- 等 rage 開始下降
                 local timeout = tick() + 10
                 while toggles.attacker and tick() < timeout do
                     local c = player.Character
@@ -658,29 +684,32 @@ local function runAttackerLoop()
 
         else
             -- 【階段C】frenzy 中
-            if rage == 0 then
-                -- rage 降到 0，frenzy 結束，回到階段A
-                frenzyActive = false
-                task.wait(0.05)
-            elseif rage <= values.minRage then
-                -- rage 已降到最低憤怒值，立刻攻擊一次
-                local leftArm = getNearestTargetLeftArm()
-                if leftArm then
-                    pcall(function()
-                        ReplicatedStorage.GRRRR:FireServer(leftArm)
-                    end)
+            if rage <= values.minRage and rage > 0 then
+                if hasTargetNearby() then
+                    local leftArm = getNearestTargetLeftArm()
+                    if leftArm then
+                        pcall(function() ReplicatedStorage.GRRRR:FireServer(leftArm) end)
+                    end
                 end
-                -- 等 rage 上升超過 minRage，再等它降回來才繼續打
-                task.wait(0.05)
-                local waitUp = tick() + 5
-                while toggles.attacker and tick() < waitUp do
-                    local c = player.Character
-                    local r = (c and c:GetAttribute("rage_percent")) or 0
-                    if r > values.minRage or r == 0 then break end
-                    task.wait(0.05)
+                task.wait(values.attackInterval)
+
+                -- 攻擊後檢查 rage 狀態
+                local c = player.Character
+                local r = (c and c:GetAttribute("rage_percent")) or 0
+
+                if r > values.minRage then
+                    -- rage 已回到 minRage 以上，等它再次降到 minRage 以下才繼續打
+                    while toggles.attacker do
+                        local c2 = player.Character
+                        local r2 = (c2 and c2:GetAttribute("rage_percent")) or 0
+                        if r2 <= values.minRage then break end
+                        task.wait(0.05)
+                    end
                 end
+                -- 若 rage 還在 1~minRage，下一輪繼續打
+
             else
-                -- rage 還在 minRage 以上，繼續等
+                -- rage > minRage，等
                 task.wait(0.05)
             end
         end
@@ -840,19 +869,13 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
             ragdolledObj = folder:FindFirstChild("Ragdolled")
         end
     end)
-
-    -- 取得 LastSlappedBy 物件（只用來確認是誰打的）
-    local lastSlappedByObj = nil
-    pcall(function()
-        local folder = Workspace:FindFirstChild(player.Name)
-        if folder then
-            lastSlappedByObj = folder:FindFirstChild("LastSlappedBy")
-        end
-    end)
+    print("[診斷] Ragdolled 物件:", ragdolledObj and "找到 ✅" or "找不到 ❌")
+    print("[診斷] 幫助目標名稱:", tgt.Name)
 
     -- 初始階段
     local initRage = getPlayerAttr(tgt, "rage_percent") or 0
     local tgtRageDescending = (initRage > 0)
+    print("[診斷] 初始怒氣值:", initRage, "| 初始階段:", tgtRageDescending and "下降(可重置)" or "上升(不可重置)")
 
     -- 取樣視窗
     local WINDOW = 5
@@ -873,27 +896,36 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
 
     pushSample(initRage)
 
-    -- 用 Ragdolled.Changed 偵測被打（false→true 時觸發）
+    -- 用 Ragdolled.Changed 偵測被打
     local gotHit = false
     local ragdolledConn = nil
 
     local function setupRagdolledConn()
         if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
-        if not ragdolledObj or not ragdolledObj.Parent then return end
+        if not ragdolledObj or not ragdolledObj.Parent then
+            print("[診斷] setupRagdolledConn: 物件無效，跳過綁定 ❌")
+            return
+        end
         ragdolledConn = ragdolledObj.Changed:Connect(function(newVal)
+            print("[診斷] Ragdolled Changed 觸發! 新值:", newVal, "| 當前階段:", tgtRageDescending and "下降(可重置)" or "上升(不可重置)")
             if newVal == true then
-                -- 確認是幫助目標打的
+                -- 被打後 LastSlappedBy 才會存在，在這裡即時讀取
                 local slappedBy = ""
                 pcall(function()
-                    if lastSlappedByObj and lastSlappedByObj.Parent then
-                        slappedBy = tostring(lastSlappedByObj.Value) or ""
+                    local folder = Workspace:FindFirstChild(player.Name)
+                    if folder then
+                        local obj = folder:FindFirstChild("LastSlappedBy")
+                        if obj then slappedBy = tostring(obj.Value) or "" end
                     end
                 end)
+                print("[診斷] LastSlappedBy 當前值:", slappedBy, "| 目標名:", tgt.Name, "| 符合:", slappedBy == tgt.Name)
                 if slappedBy == tgt.Name then
                     gotHit = true
+                    print("[診斷] gotHit 設為 true ✅")
                 end
             end
         end)
+        print("[診斷] Ragdolled.Changed 綁定成功 ✅")
     end
 
     setupRagdolledConn()
@@ -904,11 +936,11 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
 
         -- 若 Ragdolled 物件失效，重新取得並重新綁定
         if not ragdolledObj or not ragdolledObj.Parent then
+            print("[診斷] Ragdolled 物件失效，重新取得...")
             pcall(function()
                 local folder = Workspace:FindFirstChild(player.Name)
                 if folder then
                     ragdolledObj = folder:FindFirstChild("Ragdolled")
-                    lastSlappedByObj = folder:FindFirstChild("LastSlappedBy")
                 end
             end)
             setupRagdolledConn()
@@ -937,6 +969,7 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
             local tgtRage = getPlayerAttr(tgt, "rage_percent") or 0
             pushSample(tgtRage)
 
+            local prevState = tgtRageDescending
             if tgtRage >= 100 then
                 tgtRageDescending = true
             elseif tgtRage == 0 then
@@ -944,19 +977,28 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
             elseif #samples >= 3 then
                 tgtRageDescending = hasAnyDrop()
             end
+
+            -- 階段有變化時才印
+            if tgtRageDescending ~= prevState then
+                print("[診斷] 階段切換! 怒氣:", tgtRage, "| 現在:", tgtRageDescending and "下降(可重置)" or "上升(不可重置)", "| 樣本:", table.concat(samples, ","))
+            end
         end
 
-        -- 被幫助目標打到了（Ragdolled Changed 觸發）
+        -- 被幫助目標打到了
         if gotHit then
             gotHit = false
+            print("[診斷] gotHit 處理中 | tgtRageDescending:", tgtRageDescending)
 
             if tgtRageDescending then
+                print("[診斷] 條件成立，執行重置! ✅")
                 if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
                 pcall(function()
                     Players.LocalPlayer.Reset:FireServer()
                 end)
                 task.wait(0.1)
                 break
+            else
+                print("[診斷] 上升階段，忽略重置 ❌")
             end
         end
 
@@ -1195,7 +1237,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的憤怒精通腳本 v0.5 已載入!")
+print("貓玲的憤怒精通腳本 v0.6 已載入!")
 print("攻擊者功能:")
 print("  自動攻擊: rage<100→GRRRR(Left Arm) 每0.8s | rage=100→GRRRRR(frenzy) | 等rage降至最低憤怒值後繼續")
 print("  固定位置: 鎖定當前 CFrame")
