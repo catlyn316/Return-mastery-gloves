@@ -1,4 +1,4 @@
--- 貓玲的靈魂精通腳本 v0.4
+-- 貓玲的靈魂精通腳本 v0.6
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -620,7 +620,7 @@ end)
 -- 攻擊者主邏輯
 -- ============================================================
 
--- 第一、三任務：souls < 100 → GeneralHit；souls >= 100 → 等幫助者條件 → Ability(true)
+-- 第一、三任務：souls < 100 → GeneralHit；souls >= 100 → 等幫助者條件（最短5秒）→ Ability(true)
 local function runQuest13()
     while toggles.attacker do
         local char = player.Character
@@ -637,7 +637,8 @@ local function runQuest13()
             end
             task.wait(0.8)
         else
-            -- souls >= 100，等幫助者非 ragdoll 且在 15 單位內
+            -- souls >= 100，最短等 5 秒，且幫助者非 ragdoll 且在範圍內才發動
+            local abilityDist = (values.helpMode == "被打後不重置") and 10 or 15
             local function helperReady()
                 local myChar = player.Character
                 local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
@@ -651,10 +652,11 @@ local function runQuest13()
                 end
                 if not nearestP then return false end
                 if isPlayerRagdoll(nearestP) then return false end
-                return minDist <= 15
+                return minDist <= abilityDist
             end
 
-            local waitTimeout = tick() + 3
+            -- 最多等 5 秒，幫助者到了可提前發動
+            local waitTimeout = tick() + 5
             while toggles.attacker and tick() < waitTimeout do
                 if helperReady() then break end
                 task.wait(0.1)
@@ -761,7 +763,7 @@ local function runQuest2()
     end
 end
 
--- 第四任務：GeneralHit → 等目標非 ragdoll → GeneralAbility(false) → 0.5s → 重複
+-- 第四任務：GeneralHit → 等目標非 ragdoll → GeneralAbility(false) → 等幫助者非 ragdoll → 重複
 local function runQuest4()
     while toggles.attacker do
         -- 找最近目標
@@ -789,7 +791,6 @@ local function runQuest4()
                     ReplicatedStorage.GeneralHit:FireServer(torso)
                 end)
 
-                -- 等待目標進入 ragdoll 後退出，或直接等非 ragdoll
                 task.wait(0.05)
 
                 -- 等目標不是 ragdoll（最多等 5 秒）
@@ -805,6 +806,27 @@ local function runQuest4()
                 pcall(function()
                     ReplicatedStorage.GeneralAbility:FireServer(false)
                 end)
+
+                -- 等幫助者（最近玩家）從 ragdoll 恢復後再繼續（最多等 8 秒）
+                local helper = nil
+                local myChar = player.Character
+                local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                if myHrp then
+                    local minDist2 = math.huge
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                            local d = (p.Character.HumanoidRootPart.Position - myHrp.Position).Magnitude
+                            if d < minDist2 then minDist2 = d; helper = p end
+                        end
+                    end
+                end
+                if helper then
+                    local helperTimeout = tick() + 8
+                    while toggles.attacker and tick() < helperTimeout do
+                        if not isPlayerRagdoll(helper) then break end
+                        task.wait(0.05)
+                    end
+                end
 
                 task.wait(0.5)
             else
@@ -1058,15 +1080,35 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 task.wait(0.5)
                 if not toggles.helpTarget then break end
 
-                teleportToTarget(hrp, tgt)
+                -- 傳送到目標，若5秒內沒成功則重新開始流程
+                local teleportSuccess = false
+                local tpStart = tick()
+                while toggles.helpTarget and tick() - tpStart < 5 do
+                    teleportToTarget(hrp, tgt)
+                    -- 檢查是否已到目標附近（5單位內視為成功）
+                    pcall(function()
+                        local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                        if tgtRoot and hrp and hrp.Parent then
+                            if (tgtRoot.Position - hrp.Position).Magnitude <= (values.helpDistance + 5) then
+                                teleportSuccess = true
+                            end
+                        end
+                    end)
+                    if teleportSuccess then break end
+                    task.wait(0.5)
+                end
                 if not toggles.helpTarget then break end
+                if not teleportSuccess then continue end  -- 5秒沒傳成功，重新開始
 
                 if values.helpMode == "被打後不重置" then
+                    -- 被打後不重置模式：傳送距離改 10
+                    local origDist = values.helpDistance
+                    values.helpDistance = 10
+                    teleportToTarget(hrp, tgt)
                     runHelpLoopNoReset(hrp, hum, tgt)
+                    values.helpDistance = origDist
                 else
-                    -- ragdoll時重置模式
                     runHelpLoopRagdollReset(hrp, hum, tgt)
-                    -- 迴圈結束代表死亡/角色消失，外層 while 重新等角色
                 end
             end
         end)
@@ -1198,7 +1240,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的靈魂精通腳本 v0.4 已載入!")
+print("貓玲的靈魂精通腳本 v0.6 已載入!")
 print("攻擊者功能:")
 print("  第一三任務: souls<100→GeneralHit | souls>=100→GeneralAbility(true)")
 print("  第二任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
