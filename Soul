@@ -648,6 +648,31 @@ local function runQuest123()
                 end)
                 task.wait(0.05)
             else
+                -- charge = 100，等幫助者從 ragdoll 恢復且在 15 單位內再發動能力
+                local function helperReadyToAbility()
+                    local tgt = values.targetPlayer
+                    if not tgt or not tgt.Character then return false end
+                    local tgtHrp = tgt.Character:FindFirstChild("HumanoidRootPart")
+                    if not tgtHrp then return false end
+                    -- 檢查幫助者非 ragdoll
+                    if isPlayerRagdoll(tgt) then return false end
+                    -- 檢查幫助者在 15 單位內
+                    local myChar = player.Character
+                    local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                    if not myHrp then return false end
+                    local dist = (tgtHrp.Position - myHrp.Position).Magnitude
+                    return dist <= 15
+                end
+
+                -- 等待條件成立（最多等 30 秒）
+                local waitTimeout = tick() + 30
+                while toggles.attacker and tick() < waitTimeout do
+                    if helperReadyToAbility() then break end
+                    task.wait(0.1)
+                end
+
+                if not toggles.attacker then break end
+
                 -- 發動能力
                 pcall(function()
                     ReplicatedStorage.GeneralAbility:FireServer(true)
@@ -855,6 +880,10 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
 
         -- 偵測自己 ragdoll
         if isSelfRagdoll() then
+            -- 等一小段讓 LastSlappedBy 的 Time 更新後再判斷
+            task.wait(0.3)
+            if not toggles.helpTarget then break end
+
             local currentSlappedTime = getSlappedTime()
             -- 如果 Time 沒有增加（相同或 nil），則觸發重置
             local shouldReset = false
@@ -866,7 +895,7 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
             elseif currentSlappedTime <= lastSlappedTime then
                 shouldReset = true
             else
-                -- Time 確實增加，更新記錄
+                -- Time 確實增加，更新記錄，不重置
                 lastSlappedTime = currentSlappedTime
             end
 
