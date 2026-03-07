@@ -632,7 +632,7 @@ local function runQuest123()
                     ReplicatedStorage.GeneralHit:FireServer(torso)
                 end)
             end
-            task.wait(0.05)
+            task.wait(0.8)
         else
             -- 開始充能
             local charge = char:GetAttribute("charge") or 0
