@@ -908,31 +908,51 @@ end
 
 -- ============================================================
 -- 幫助者位置迴圈：ragdoll時重置
--- 偵測自己 ragdoll，且 LastSlappedBy 的 Attributes.Time 沒增加 → 重置（傳 Teleport1）
+-- ragdoll 時，若 aoe_blast 在自己 30 單位內 且 自己在攻擊者 15 單位內 → 等 0.5s 後重置
+-- 其他情況 ragdoll → 等自然結束，不干涉
 -- ============================================================
 local function runHelpLoopRagdollReset(hrp, hum, tgt)
-    local lastSlappedTime = nil
-    local function getSlappedTime()
-        local val = nil
+
+    -- 檢查是否有 aoe_blast 在自己 30 單位內
+    local function aoeBlastNearby()
+        local result = false
         pcall(function()
-            local lsb = player:GetAttribute("LastSlappedBy")
-            if lsb then
-                local slapper = Players:FindFirstChild(lsb)
-                if slapper then
-                    val = slapper:GetAttribute("Time")
+            local myPos = hrp.Position
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj.Name == "aoe_blast" then
+                    local objPos
+                    if obj:IsA("BasePart") then
+                        objPos = obj.Position
+                    elseif obj:IsA("Model") and obj.PrimaryPart then
+                        objPos = obj.PrimaryPart.Position
+                    end
+                    if objPos and (objPos - myPos).Magnitude <= 30 then
+                        result = true
+                        break
+                    end
                 end
             end
         end)
-        return val
+        return result
     end
 
-    lastSlappedTime = getSlappedTime()
+    -- 檢查自己是否在攻擊者（tgt）15 單位內
+    local function nearAttacker()
+        local result = false
+        pcall(function()
+            local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+            if tgtRoot then
+                result = (tgtRoot.Position - hrp.Position).Magnitude <= 15
+            end
+        end)
+        return result
+    end
 
     while toggles.helpTarget do
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        -- 非 ragdoll 狀態才固定/跟隨位置
+        -- 非 ragdoll：固定/跟隨位置
         if not isSelfRagdoll() then
             pcall(function()
                 if toggles.fixedPosHelp and values.fixedCFrame then
@@ -947,29 +967,12 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
                 end
             end)
         else
-            -- 進入 ragdoll：等 0.3 秒讓 Time 更新後判斷
-            task.wait(0.3)
-            if not toggles.helpTarget then break end
-
-            local currentSlappedTime = getSlappedTime()
-
-            -- 判斷 Time 是否增加
-            local timeIncreased = false
-            if currentSlappedTime ~= nil then
-                if lastSlappedTime == nil then
-                    -- 第一次有值，記錄，不重置
-                    lastSlappedTime = currentSlappedTime
-                    timeIncreased = true
-                elseif currentSlappedTime > lastSlappedTime then
-                    -- Time 有增加 = 被攻擊者合法攻擊，不重置
-                    lastSlappedTime = currentSlappedTime
-                    timeIncreased = true
-                end
-            end
-
-            if not timeIncreased then
-                -- Time 沒增加 → 重置
-                -- 立刻傳到 Teleport1（此時還在 ragdoll，讓遊戲正常處理死亡）
+            -- ragdoll 中：判斷是否需要重置
+            if aoeBlastNearby() and nearAttacker() then
+                -- 條件成立，等 0.5 秒後重置
+                task.wait(0.5)
+                if not toggles.helpTarget then break end
+                -- 傳到 Teleport1 重置
                 pcall(function()
                     local tp1 = Workspace.Lobby:FindFirstChild("Teleport1")
                     if tp1 and hrp and hrp.Parent then
@@ -987,7 +990,7 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
                 end
                 if not toggles.helpTarget then break end
                 task.wait(0.2)
-                -- 重置後傳回目標前方
+                -- 傳回目標前方
                 pcall(function()
                     local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
                     if tgtRoot and hrp and hrp.Parent then
@@ -1000,9 +1003,8 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
                         end
                     end
                 end)
-                lastSlappedTime = getSlappedTime()
             else
-                -- Time 有增加，等 ragdoll 自然結束，期間不動位置
+                -- 條件不成立，等 ragdoll 自然結束，不干涉
                 while toggles.helpTarget do
                     if not isSelfRagdoll() then break end
                     task.wait(0.05)
