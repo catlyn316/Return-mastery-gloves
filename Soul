@@ -1,4 +1,4 @@
--- 貓玲的靈魂精通腳本 v0.6
+-- 貓玲的靈魂精通腳本 v0.7
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -29,7 +29,7 @@ local toggles = {
 local values = {
     questMode     = "第二任務",   -- "第一三任務" | "第二任務" | "第四任務"
     helpDistance  = 5,
-    helpMode      = "ragdoll時重置",  -- "ragdoll時重置" | "被打後不重置"
+    helpMode      = "被blast時重置",  -- "被blast時重置" | "被打後不重置"
     targetPlayer  = nil,
     fixedCFrame   = nil,
 }
@@ -486,7 +486,7 @@ local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離
 
 -- 幫助模式
 local helpModeFrame, helpModeButton = createWideButtonRow(
-    page2, "幫助模式:", "ragdoll時重置",
+    page2, "幫助模式:", "被blast時重置",
     Color3.fromRGB(70, 130, 200), 3
 )
 
@@ -638,7 +638,7 @@ local function runQuest13()
             task.wait(0.8)
         else
             -- souls >= 100，最短等 5 秒，且幫助者非 ragdoll 且在範圍內才發動
-            local abilityDist = (values.helpMode == "被打後不重置") and 10 or 15
+            local abilityDist = 15
             local function helperReady()
                 local myChar = player.Character
                 local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
@@ -786,10 +786,52 @@ local function runQuest4()
         if nearestPlayer and nearestPlayer.Character then
             local torso = nearestPlayer.Character:FindFirstChild("Torso")
             if torso then
+                -- 記錄打擊前的 Slaps 數值
+                local slapsBefore = 0
+                pcall(function()
+                    local ls = player.leaderstats
+                    if ls and ls:FindFirstChild("Slaps") then
+                        slapsBefore = ls.Slaps.Value
+                    end
+                end)
+
                 -- 攻擊
                 pcall(function()
                     ReplicatedStorage.GeneralHit:FireServer(torso)
                 end)
+
+                task.wait(0.3)
+
+                -- 檢查 Slaps 是否有增加，沒有則補點擊畫面
+                local slapsAfter = 0
+                pcall(function()
+                    local ls = player.leaderstats
+                    if ls and ls:FindFirstChild("Slaps") then
+                        slapsAfter = ls.Slaps.Value
+                    end
+                end)
+
+                if slapsAfter <= slapsBefore then
+                    -- Slaps 沒變，補打：模擬點擊畫面中央
+                    pcall(function()
+                        local screenCenter = Vector2.new(
+                            workspace.CurrentCamera.ViewportSize.X / 2,
+                            workspace.CurrentCamera.ViewportSize.Y / 2
+                        )
+                        -- 判斷裝置類型
+                        if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+                            -- 手機/平板：模擬 touch
+                            local vgi = Instance.new("InputObject")
+                            vgi.UserInputType = Enum.UserInputType.Touch
+                            vgi.UserInputState = Enum.UserInputState.Begin
+                            vgi.Position = Vector3.new(screenCenter.X, screenCenter.Y, 0)
+                            UserInputService:SendSimulatedMouseOrTouchEvent(screenCenter, Enum.UserInputType.Touch)
+                        else
+                            -- 電腦：模擬滑鼠點擊
+                            mouse1click()
+                        end
+                    end)
+                end
 
                 task.wait(0.05)
 
@@ -865,13 +907,13 @@ end)
 -- 幫助模式切換
 -- ============================================================
 helpModeButton.MouseButton1Click:Connect(function()
-    if values.helpMode == "ragdoll時重置" then
+    if values.helpMode == "被blast時重置" then
         values.helpMode = "被打後不重置"
         helpModeButton.Text = "被打後不重置"
         helpModeButton.BackgroundColor3 = Color3.fromRGB(150, 80, 180)
     else
-        values.helpMode = "ragdoll時重置"
-        helpModeButton.Text = "ragdoll時重置"
+        values.helpMode = "被blast時重置"
+        helpModeButton.Text = "被blast時重置"
         helpModeButton.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
     end
 end)
@@ -929,7 +971,7 @@ local function runHelpLoopNoReset(hrp, hum, tgt)
 end
 
 -- ============================================================
--- 幫助者位置迴圈：ragdoll時重置
+-- 幫助者位置迴圈：被blast時重置
 -- ragdoll 時，若 aoe_blast 在自己 30 單位內 且 自己在攻擊者 15 單位內 → 等 0.5s 後重置
 -- 其他情況 ragdoll → 等自然結束，不干涉
 -- ============================================================
@@ -1101,12 +1143,7 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 if not teleportSuccess then continue end  -- 5秒沒傳成功，重新開始
 
                 if values.helpMode == "被打後不重置" then
-                    -- 被打後不重置模式：傳送距離改 10
-                    local origDist = values.helpDistance
-                    values.helpDistance = 10
-                    teleportToTarget(hrp, tgt)
                     runHelpLoopNoReset(hrp, hum, tgt)
-                    values.helpDistance = origDist
                 else
                     runHelpLoopRagdollReset(hrp, hum, tgt)
                 end
@@ -1240,12 +1277,12 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的靈魂精通腳本 v0.6 已載入!")
+print("貓玲的靈魂精通腳本 v0.7 已載入!")
 print("攻擊者功能:")
 print("  第一三任務: souls<100→GeneralHit | souls>=100→GeneralAbility(true)")
 print("  第二任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
 print("  第四任務: GeneralHit → 等非ragdoll → GeneralAbility(false) → 0.5s → 循環")
 print("  固定位置: 鎖定當前 CFrame")
 print("幫助者功能:")
-print("  ragdoll時重置(預設): ragdoll且LastSlappedBy.Time未增加→傳Teleport1重置")
+print("  被blast時重置(預設): ragdoll且LastSlappedBy.Time未增加→傳Teleport1重置")
 print("  被打後不重置: 永久固定/跟隨")
