@@ -1,4 +1,4 @@
--- 貓玲的靈魂精通腳本 v0.1
+-- 貓玲的靈魂精通腳本 v0.2
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -27,7 +27,7 @@ local toggles = {
 }
 
 local values = {
-    questMode     = "第一至三任務",   -- "第一至三任務" | "第四任務"
+    questMode     = "第二任務",   -- "第一三任務" | "第二任務" | "第四任務"
     helpDistance  = 5,
     helpMode      = "ragdoll時重置",  -- "ragdoll時重置" | "被打後不重置"
     targetPlayer  = nil,
@@ -412,7 +412,7 @@ end
 
 -- 任務選擇
 local questModeFrame, questModeBtn = createWideButtonRow(
-    page1, "任務模式:", "第一至三任務",
+    page1, "任務模式:", "第二任務",
     Color3.fromRGB(60, 120, 200), 1
 )
 
@@ -592,16 +592,20 @@ end)
 -- 任務模式切換
 -- ============================================================
 questModeBtn.MouseButton1Click:Connect(function()
-    if values.questMode == "第一至三任務" then
+    if values.questMode == "第一三任務" then
+        values.questMode = "第二任務"
+        questModeBtn.Text = "第二任務"
+        questModeBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+    elseif values.questMode == "第二任務" then
         values.questMode = "第四任務"
         questModeBtn.Text = "第四任務"
         questModeBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 50)
     else
-        values.questMode = "第一至三任務"
-        questModeBtn.Text = "第一至三任務"
-        questModeBtn.BackgroundColor3 = Color3.fromRGB(60, 120, 200)
+        values.questMode = "第一三任務"
+        questModeBtn.Text = "第一三任務"
+        questModeBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 180)
     end
-    -- 如果攻擊中，停止並提示重新啟動
+    -- 如果攻擊中，停止
     if toggles.attacker then
         toggles.attacker = false
         if connections.attacker then
@@ -616,8 +620,64 @@ end)
 -- 攻擊者主邏輯
 -- ============================================================
 
--- 第一至三任務：souls < 100 → GeneralHit；souls >= 100 → charge；charge = 100 → Ability(true)
-local function runQuest123()
+-- 第一、三任務：souls < 100 → GeneralHit；souls >= 100 → 等幫助者條件 → Ability(true)
+local function runQuest13()
+    while toggles.attacker do
+        local char = player.Character
+        if not char then task.wait(0.2) continue end
+
+        local souls = char:GetAttribute("souls") or 0
+
+        if souls < 100 then
+            local torso = getNearestTargetTorso()
+            if torso then
+                pcall(function()
+                    ReplicatedStorage.GeneralHit:FireServer(torso)
+                end)
+            end
+            task.wait(0.8)
+        else
+            -- souls >= 100，等幫助者非 ragdoll 且在 15 單位內
+            local function helperReady()
+                local myChar = player.Character
+                local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                if not myHrp then return false end
+                local nearestP, minDist = nil, math.huge
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                        local d = (p.Character.HumanoidRootPart.Position - myHrp.Position).Magnitude
+                        if d < minDist then minDist = d; nearestP = p end
+                    end
+                end
+                if not nearestP then return false end
+                if isPlayerRagdoll(nearestP) then return false end
+                return minDist <= 15
+            end
+
+            local waitTimeout = tick() + 3
+            while toggles.attacker and tick() < waitTimeout do
+                if helperReady() then break end
+                task.wait(0.1)
+            end
+            if not toggles.attacker then break end
+
+            pcall(function()
+                ReplicatedStorage.GeneralAbility:FireServer(true)
+            end)
+            task.wait(0.1)
+            -- 等 souls 重置
+            local timeout = tick() + 5
+            while toggles.attacker and tick() < timeout do
+                local c = player.Character
+                if c and (c:GetAttribute("souls") or 0) < 100 then break end
+                task.wait(0.1)
+            end
+        end
+    end
+end
+
+-- 第二任務：souls < 100 → GeneralHit；souls >= 100 → charge；charge = 100 → Ability(true)
+local function runQuest2()
     while toggles.attacker do
         local char = player.Character
         if not char then task.wait(0.2) continue end
@@ -761,8 +821,10 @@ attackerButton.MouseButton1Click:Connect(function()
 
     if toggles.attacker then
         connections.attacker = task.spawn(function()
-            if values.questMode == "第一至三任務" then
-                runQuest123()
+            if values.questMode == "第一三任務" then
+                runQuest13()
+            elseif values.questMode == "第二任務" then
+                runQuest2()
             else
                 runQuest4()
             end
@@ -849,7 +911,6 @@ end
 -- 偵測自己 ragdoll，且 LastSlappedBy 的 Attributes.Time 沒增加 → 重置（傳 Teleport1）
 -- ============================================================
 local function runHelpLoopRagdollReset(hrp, hum, tgt)
-    -- 記錄 LastSlappedBy 的 Time（初始值）
     local lastSlappedTime = nil
     local function getSlappedTime()
         local val = nil
@@ -871,49 +932,44 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        -- 固定或跟隨
-        pcall(function()
-            if toggles.fixedPosHelp and values.fixedCFrame then
-                hrp.CFrame = values.fixedCFrame
-            elseif not toggles.fixedPosHelp then
-                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                if tgtRoot then
-                    local lookDir = tgtRoot.CFrame.LookVector
-                    local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
-                    hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
+        -- 非 ragdoll 狀態才固定/跟隨位置
+        if not isSelfRagdoll() then
+            pcall(function()
+                if toggles.fixedPosHelp and values.fixedCFrame then
+                    hrp.CFrame = values.fixedCFrame
+                elseif not toggles.fixedPosHelp then
+                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                    if tgtRoot then
+                        local lookDir = tgtRoot.CFrame.LookVector
+                        local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
+                        hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
+                    end
                 end
-            end
-        end)
-
-        -- 偵測自己 ragdoll
-        if isSelfRagdoll() then
-            -- 等一小段讓 LastSlappedBy 的 Time 更新後再判斷
+            end)
+        else
+            -- 進入 ragdoll：等 0.3 秒讓 Time 更新後判斷
             task.wait(0.3)
             if not toggles.helpTarget then break end
 
             local currentSlappedTime = getSlappedTime()
 
+            -- 判斷 Time 是否增加
             local timeIncreased = false
-            if currentSlappedTime ~= nil and lastSlappedTime ~= nil and currentSlappedTime > lastSlappedTime then
-                -- Time 有增加 = 被攻擊者打的，更新記錄，什麼都不做
-                lastSlappedTime = currentSlappedTime
-                timeIncreased = true
-            elseif currentSlappedTime ~= nil and lastSlappedTime == nil then
-                -- 第一次有 Time，記錄下來，不重置
-                lastSlappedTime = currentSlappedTime
-                timeIncreased = true
+            if currentSlappedTime ~= nil then
+                if lastSlappedTime == nil then
+                    -- 第一次有值，記錄，不重置
+                    lastSlappedTime = currentSlappedTime
+                    timeIncreased = true
+                elseif currentSlappedTime > lastSlappedTime then
+                    -- Time 有增加 = 被攻擊者合法攻擊，不重置
+                    lastSlappedTime = currentSlappedTime
+                    timeIncreased = true
+                end
             end
 
             if not timeIncreased then
-                -- Time 沒增加（被其他人打或來源不明）→ 重置
-                -- 先等不再 ragdoll
-                local t0 = tick()
-                while tick() - t0 < 5 do
-                    if not isSelfRagdoll() then break end
-                    task.wait(0.1)
-                end
-                if not toggles.helpTarget then break end
-                -- 重置：傳送到 Teleport1
+                -- Time 沒增加 → 重置
+                -- 立刻傳到 Teleport1（此時還在 ragdoll，讓遊戲正常處理死亡）
                 pcall(function()
                     local tp1 = Workspace.Lobby:FindFirstChild("Teleport1")
                     if tp1 and hrp and hrp.Parent then
@@ -923,9 +979,15 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
                         end
                     end
                 end)
-                task.wait(0.3)
+                -- 等 ragdoll 結束
+                local t0 = tick()
+                while tick() - t0 < 5 do
+                    if not isSelfRagdoll() then break end
+                    task.wait(0.1)
+                end
                 if not toggles.helpTarget then break end
-                -- 重置後重新定位到目標前方
+                task.wait(0.2)
+                -- 重置後傳回目標前方
                 pcall(function()
                     local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
                     if tgtRoot and hrp and hrp.Parent then
@@ -939,6 +1001,12 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
                     end
                 end)
                 lastSlappedTime = getSlappedTime()
+            else
+                -- Time 有增加，等 ragdoll 自然結束，期間不動位置
+                while toggles.helpTarget do
+                    if not isSelfRagdoll() then break end
+                    task.wait(0.05)
+                end
             end
         end
 
@@ -1159,9 +1227,10 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的靈魂精通腳本 v0.1 已載入!")
+print("貓玲的靈魂精通腳本 v0.2 已載入!")
 print("攻擊者功能:")
-print("  第一至三任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
+print("  第一三任務: souls<100→GeneralHit | souls>=100→GeneralAbility(true)")
+print("  第二任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
 print("  第四任務: GeneralHit → 等非ragdoll → GeneralAbility(false) → 0.5s → 循環")
 print("  固定位置: 鎖定當前 CFrame")
 print("幫助者功能:")
