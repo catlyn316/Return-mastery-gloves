@@ -1,4 +1,4 @@
--- 貓玲的靈魂精通腳本 v0.3
+-- 貓玲的靈魂精通腳本 v0.4
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -952,63 +952,32 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        -- 非 ragdoll：固定/跟隨位置
-        if not isSelfRagdoll() then
-            pcall(function()
-                if toggles.fixedPosHelp and values.fixedCFrame then
-                    hrp.CFrame = values.fixedCFrame
-                elseif not toggles.fixedPosHelp then
-                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                    if tgtRoot then
-                        local lookDir = tgtRoot.CFrame.LookVector
-                        local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
-                        hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
-                    end
+        -- ragdoll 和非 ragdoll 都固定/跟隨位置
+        pcall(function()
+            if toggles.fixedPosHelp and values.fixedCFrame then
+                hrp.CFrame = values.fixedCFrame
+            elseif not toggles.fixedPosHelp then
+                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                if tgtRoot then
+                    local lookDir = tgtRoot.CFrame.LookVector
+                    local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
+                    hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
                 end
-            end)
-        else
-            -- ragdoll 中：判斷是否需要重置
+            end
+        end)
+
+        -- ragdoll 中：判斷是否需要重置
+        if isSelfRagdoll() then
             if aoeBlastNearby() and nearAttacker() then
-                -- 條件成立，等 0.5 秒後重置
+                -- 條件成立，等 0.5 秒後 Reset
                 task.wait(0.5)
                 if not toggles.helpTarget then break end
-                -- 傳到 Teleport1 重置
                 pcall(function()
-                    local tp1 = Workspace.Lobby:FindFirstChild("Teleport1")
-                    if tp1 and hrp and hrp.Parent then
-                        hrp.CFrame = tp1.CFrame
-                        if toggles.fixedPosHelp then
-                            values.fixedCFrame = tp1.CFrame
-                        end
-                    end
+                    Players.LocalPlayer.Reset:FireServer()
                 end)
-                -- 等 ragdoll 結束
-                local t0 = tick()
-                while tick() - t0 < 5 do
-                    if not isSelfRagdoll() then break end
-                    task.wait(0.1)
-                end
-                if not toggles.helpTarget then break end
-                task.wait(0.2)
-                -- 傳回目標前方
-                pcall(function()
-                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                    if tgtRoot and hrp and hrp.Parent then
-                        local lookDir = tgtRoot.CFrame.LookVector
-                        local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
-                        local newCF = CFrame.new(newPos, newPos + lookDir)
-                        hrp.CFrame = newCF
-                        if toggles.fixedPosHelp then
-                            values.fixedCFrame = newCF
-                        end
-                    end
-                end)
-            else
-                -- 條件不成立，等 ragdoll 自然結束，不干涉
-                while toggles.helpTarget do
-                    if not isSelfRagdoll() then break end
-                    task.wait(0.05)
-                end
+                -- 等重生（hrp 和 hum 會失效，外層迴圈會 break，由主流程重新啟動）
+                task.wait(0.1)
+                break
             end
         end
 
@@ -1229,7 +1198,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的靈魂精通腳本 v0.3 已載入!")
+print("貓玲的靈魂精通腳本 v0.4 已載入!")
 print("攻擊者功能:")
 print("  第一三任務: souls<100→GeneralHit | souls>=100→GeneralAbility(true)")
 print("  第二任務: souls<100→GeneralHit | souls>=100→soul:charge | charge=100→GeneralAbility(true)")
