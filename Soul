@@ -648,24 +648,31 @@ local function runQuest123()
                 end)
                 task.wait(0.05)
             else
-                -- charge = 100，等幫助者從 ragdoll 恢復且在 15 單位內再發動能力
+                -- charge = 100，等幫助者（最近玩家）從 ragdoll 恢復且在 15 單位內再發動能力
                 local function helperReadyToAbility()
-                    local tgt = values.targetPlayer
-                    if not tgt or not tgt.Character then return false end
-                    local tgtHrp = tgt.Character:FindFirstChild("HumanoidRootPart")
-                    if not tgtHrp then return false end
-                    -- 檢查幫助者非 ragdoll
-                    if isPlayerRagdoll(tgt) then return false end
-                    -- 檢查幫助者在 15 單位內
                     local myChar = player.Character
                     local myHrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
                     if not myHrp then return false end
-                    local dist = (tgtHrp.Position - myHrp.Position).Magnitude
-                    return dist <= 15
+                    -- 找最近玩家
+                    local nearestP = nil
+                    local minDist = math.huge
+                    for _, p in ipairs(Players:GetPlayers()) do
+                        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                            local d = (p.Character.HumanoidRootPart.Position - myHrp.Position).Magnitude
+                            if d < minDist then
+                                minDist = d
+                                nearestP = p
+                            end
+                        end
+                    end
+                    if not nearestP then return false end
+                    -- 非 ragdoll 且在 15 單位內
+                    if isPlayerRagdoll(nearestP) then return false end
+                    return minDist <= 15
                 end
 
-                -- 等待條件成立（最多等 30 秒）
-                local waitTimeout = tick() + 30
+                -- 等待條件成立（最多等 3 秒）
+                local waitTimeout = tick() + 3
                 while toggles.attacker and tick() < waitTimeout do
                     if helperReadyToAbility() then break end
                     task.wait(0.1)
@@ -885,39 +892,40 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
             if not toggles.helpTarget then break end
 
             local currentSlappedTime = getSlappedTime()
-            -- 如果 Time 沒有增加（相同或 nil），則觸發重置
-            local shouldReset = false
-            if currentSlappedTime == nil then
-                shouldReset = true
-            elseif lastSlappedTime == nil then
-                -- 第一次有 Time，更新記錄，不重置
+
+            local timeIncreased = false
+            if currentSlappedTime ~= nil and lastSlappedTime ~= nil and currentSlappedTime > lastSlappedTime then
+                -- Time 有增加 = 被攻擊者打的，更新記錄，什麼都不做
                 lastSlappedTime = currentSlappedTime
-            elseif currentSlappedTime <= lastSlappedTime then
-                shouldReset = true
-            else
-                -- Time 確實增加，更新記錄，不重置
+                timeIncreased = true
+            elseif currentSlappedTime ~= nil and lastSlappedTime == nil then
+                -- 第一次有 Time，記錄下來，不重置
                 lastSlappedTime = currentSlappedTime
+                timeIncreased = true
             end
 
-            if shouldReset then
-                -- 傳送到 Teleport1 重置
-                pcall(function()
-                    local tp1 = Workspace.Lobby:FindFirstChild("Teleport1")
-                    if tp1 and hrp and hrp.Parent then
-                        hrp.CFrame = tp1.CFrame
-                        -- 更新固定位置為 Teleport1
-                        if toggles.fixedPosHelp then
-                            values.fixedCFrame = tp1.CFrame
-                        end
-                    end
-                end)
-                -- 等待不再 ragdoll
+            if not timeIncreased then
+                -- Time 沒增加（被其他人打或來源不明）→ 重置
+                -- 先等不再 ragdoll
                 local t0 = tick()
                 while tick() - t0 < 5 do
                     if not isSelfRagdoll() then break end
                     task.wait(0.1)
                 end
-                -- 重新定位到目標前方
+                if not toggles.helpTarget then break end
+                -- 重置：傳送到 Teleport1
+                pcall(function()
+                    local tp1 = Workspace.Lobby:FindFirstChild("Teleport1")
+                    if tp1 and hrp and hrp.Parent then
+                        hrp.CFrame = tp1.CFrame
+                        if toggles.fixedPosHelp then
+                            values.fixedCFrame = tp1.CFrame
+                        end
+                    end
+                end)
+                task.wait(0.3)
+                if not toggles.helpTarget then break end
+                -- 重置後重新定位到目標前方
                 pcall(function()
                     local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
                     if tgtRoot and hrp and hrp.Parent then
@@ -930,7 +938,6 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
                         end
                     end
                 end)
-                -- 重新讀取 Time
                 lastSlappedTime = getSlappedTime()
             end
         end
