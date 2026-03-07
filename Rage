@@ -1,4 +1,4 @@
--- 貓玲的憤怒精通腳本 v0.1
+-- 貓玲的憤怒精通腳本 v0.3
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -46,21 +46,21 @@ local savedPosition    = nil
 
 -- 主題色：深紫/靛藍
 local THEME = {
-    primary     = Color3.fromRGB(123, 104, 238),
-    primaryDark = Color3.fromRGB(83,  64, 198),
-    accent      = Color3.fromRGB(179, 157, 255),
-    bg          = Color3.fromRGB(16,  14,  30),
-    bgPanel     = Color3.fromRGB(22,  18,  42),
-    bgRow       = Color3.fromRGB(30,  24,  56),
-    bgInput     = Color3.fromRGB(42,  34,  72),
-    titleBg     = Color3.fromRGB(26,  20,  48),
-    tabBg       = Color3.fromRGB(34,  28,  60),
-    tabActive   = Color3.fromRGB(55,  46,  95),
-    textMain    = Color3.fromRGB(230, 220, 255),
-    textSub     = Color3.fromRGB(180, 165, 240),
-    textMuted   = Color3.fromRGB(120, 108, 175),
-    red         = Color3.fromRGB(244,  67,  54),
-    statusBg    = Color3.fromRGB(18,   14,  38),
+    primary     = Color3.fromRGB(220,  80,  30),
+    primaryDark = Color3.fromRGB(160,  45,  15),
+    accent      = Color3.fromRGB(255, 160,  60),
+    bg          = Color3.fromRGB(14,  10,   8),
+    bgPanel     = Color3.fromRGB(22,  14,  10),
+    bgRow       = Color3.fromRGB(32,  20,  14),
+    bgInput     = Color3.fromRGB(46,  28,  18),
+    titleBg     = Color3.fromRGB(28,  16,  10),
+    tabBg       = Color3.fromRGB(38,  24,  16),
+    tabActive   = Color3.fromRGB(80,  38,  20),
+    textMain    = Color3.fromRGB(255, 230, 200),
+    textSub     = Color3.fromRGB(220, 170, 110),
+    textMuted   = Color3.fromRGB(140,  95,  60),
+    red         = Color3.fromRGB(220,  40,  40),
+    statusBg    = Color3.fromRGB(18,  12,   8),
 }
 
 -- ============================================================
@@ -503,7 +503,7 @@ local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離
 -- 幫助模式
 local helpModeFrame, helpModeButton = createWideButtonRow(
     page2, "幫助模式:", "被打時重置",
-    Color3.fromRGB(70, 130, 200), 3
+    Color3.fromRGB(180, 60, 20), 3
 )
 
 -- 傳送後固定
@@ -545,7 +545,7 @@ local function toggleUIState(btn, frame, status, isActive, activeText, inactiveT
     if isActive then
         btn.Text = "解除"
         btn.BackgroundColor3 = THEME.red
-        frame.BackgroundColor3 = Color3.fromRGB(20, 16, 40)
+        frame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
         if status then
             status.Text = activeText or "運行中"
             status.TextColor3 = THEME.accent
@@ -584,7 +584,7 @@ fixedPosButton.MouseButton1Click:Connect(function()
             fixedPosStatus.TextColor3 = THEME.accent
             fixedPosButton.Text = "解除"
             fixedPosButton.BackgroundColor3 = THEME.red
-            fixedPosFrame.BackgroundColor3 = Color3.fromRGB(20, 16, 40)
+            fixedPosFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
         else
             isPosLockEnabled = false
         end
@@ -616,15 +616,13 @@ end)
 
 -- ============================================================
 -- 攻擊者主邏輯
--- rage_percent < 100 → 每 0.8s FireServer GRRRR 打 Left Arm
--- rage_percent == 100 → FireServer GRRRRR("frenzy")
--- frenzy 後等 rage_percent 降至 minRage → 繼續攻擊
--- 若 rage_percent 降到 0 再回到 100 → 自動再發 frenzy
+-- 階段A（rage 從 0 爬到 100）：每 0.8s 打一次 GRRRR
+-- 階段B（rage == 100）：發動 frenzy，進入 frenzy 循環
+-- 階段C（frenzy 中）：rage <= minRage 時立刻打一次，等 rage 再次 <= minRage 才繼續
+--   → rage 降到 0 後重新進入階段A（0.8s 攻擊），rage 回到 100 再次發動 frenzy
 -- ============================================================
 local function runAttackerLoop()
-    -- 追蹤上一次 rage 的 frenzy 狀態
-    -- 當 rage 從 <100 升到 100 時發動 frenzy（包含從 0 回來的情況）
-    local frenzyFired = false  -- 記錄本次 100 是否已發過 frenzy
+    local frenzyActive = false  -- 是否已發動過 frenzy（在 rage 降到 0 前持續有效）
 
     while toggles.attacker do
         local char = player.Character
@@ -632,45 +630,58 @@ local function runAttackerLoop()
 
         local rage = getSelfAttr("rage_percent") or 0
 
-        if rage < 100 then
-            -- rage 不足 100，重置 frenzy 已發旗標，繼續攻擊
-            frenzyFired = false
-
-            local leftArm = getNearestTargetLeftArm()
-            if leftArm then
+        if not frenzyActive then
+            -- 【階段A】rage 從 0 爬到 100，每 0.8s 攻擊一次
+            if rage < 100 then
+                local leftArm = getNearestTargetLeftArm()
+                if leftArm then
+                    pcall(function()
+                        ReplicatedStorage.GRRRR:FireServer(leftArm)
+                    end)
+                end
+                task.wait(0.8)
+            else
+                -- rage 到 100，發動 frenzy，切換到 frenzy 模式
                 pcall(function()
-                    ReplicatedStorage.GRRRR:FireServer(leftArm)
+                    ReplicatedStorage.GRRRRR:FireServer("frenzy")
                 end)
-            end
-            task.wait(0.8)
-
-        elseif rage >= 100 and not frenzyFired then
-            -- rage 剛到 100，發動 frenzy
-            pcall(function()
-                ReplicatedStorage.GRRRRR:FireServer("frenzy")
-            end)
-            frenzyFired = true
-
-            -- 等 rage 降到 minRage 以下才繼續攻擊（最多等 30 秒）
-            local waitTimeout = tick() + 30
-            while toggles.attacker and tick() < waitTimeout do
-                local c = player.Character
-                local currentRage = (c and c:GetAttribute("rage_percent")) or 0
-                if currentRage <= values.minRage then break end
-                task.wait(0.1)
+                frenzyActive = true
+                -- 等 rage 開始下降（離開 100）再進入 frenzy 循環
+                local timeout = tick() + 10
+                while toggles.attacker and tick() < timeout do
+                    local c = player.Character
+                    local r = (c and c:GetAttribute("rage_percent")) or 0
+                    if r < 100 then break end
+                    task.wait(0.05)
+                end
             end
 
         else
-            -- rage == 100 且已發過 frenzy，等降下來
-            local waitTimeout = tick() + 30
-            while toggles.attacker and tick() < waitTimeout do
-                local c = player.Character
-                local currentRage = (c and c:GetAttribute("rage_percent")) or 0
-                if currentRage <= values.minRage then
-                    frenzyFired = false
-                    break
+            -- 【階段C】frenzy 中
+            if rage == 0 then
+                -- rage 降到 0，frenzy 結束，回到階段A
+                frenzyActive = false
+                task.wait(0.05)
+            elseif rage <= values.minRage then
+                -- rage 已降到最低憤怒值，立刻攻擊一次
+                local leftArm = getNearestTargetLeftArm()
+                if leftArm then
+                    pcall(function()
+                        ReplicatedStorage.GRRRR:FireServer(leftArm)
+                    end)
                 end
-                task.wait(0.1)
+                -- 等 rage 上升超過 minRage，再等它降回來才繼續打
+                task.wait(0.05)
+                local waitUp = tick() + 5
+                while toggles.attacker and tick() < waitUp do
+                    local c = player.Character
+                    local r = (c and c:GetAttribute("rage_percent")) or 0
+                    if r > values.minRage or r == 0 then break end
+                    task.wait(0.05)
+                end
+            else
+                -- rage 還在 minRage 以上，繼續等
+                task.wait(0.05)
             end
         end
     end
@@ -698,13 +709,13 @@ helpModeButton.MouseButton1Click:Connect(function()
     if values.helpMode == "被打時重置" then
         values.helpMode = "被打後不重置"
         helpModeButton.Text = "被打後不重置"
-        helpModeButton.BackgroundColor3 = Color3.fromRGB(150, 80, 180)
+        helpModeButton.BackgroundColor3 = Color3.fromRGB(130, 50, 140)
         values.helpDistance = 5
         helpDistanceInput.Text = "5"
     else
         values.helpMode = "被打時重置"
         helpModeButton.Text = "被打時重置"
-        helpModeButton.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+        helpModeButton.BackgroundColor3 = Color3.fromRGB(180, 60, 20)
         values.helpDistance = 5
         helpDistanceInput.Text = "5"
     end
@@ -718,7 +729,7 @@ fixedPosHelpStatus.Text = "啟用"
 fixedPosHelpStatus.TextColor3 = THEME.accent
 fixedPosHelpButton.Text = "解除"
 fixedPosHelpButton.BackgroundColor3 = THEME.red
-fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(20, 16, 40)
+fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
 
 fixedPosHelpButton.MouseButton1Click:Connect(function()
     toggles.fixedPosHelp = not toggles.fixedPosHelp
@@ -727,7 +738,7 @@ fixedPosHelpButton.MouseButton1Click:Connect(function()
         fixedPosHelpStatus.TextColor3 = THEME.accent
         fixedPosHelpButton.Text = "解除"
         fixedPosHelpButton.BackgroundColor3 = THEME.red
-        fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(20, 16, 40)
+        fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
     else
         fixedPosHelpStatus.Text = "關閉"
         fixedPosHelpStatus.TextColor3 = THEME.textMuted
@@ -808,11 +819,43 @@ end
 
 -- ============================================================
 -- 幫助者位置迴圈：被打時重置
--- 偵測 Workspace.自己名.LastSlappedBy == 幫助目標名 → 重置
--- 若幫助目標 rage_percent == 0，等其打到 100 後再重置
+-- 用趨勢判斷 rage 所處階段：
+--   下降階段（100→0）：一段時間內 rage 有下降趨勢（允許偶爾+20的突刺）→ 可重置
+--   上升階段（0→100）：一段時間內 rage 只升不降 → 不可重置
+-- 判斷邏輯：每 0.3s 取樣一次 rage，維持一個滑動最低值
+--   若目前 rage < 最近記錄的最高值 - 閾值(5) → 確認下降趨勢 → 可重置
+--   若 rage == 0 → 切換為上升階段
+--   若上升階段中 rage >= 100 → 切換回下降階段
 -- ============================================================
 local function runHelpLoopSlappedReset(hrp, hum, tgt)
     local lastSlappedByValue = ""
+
+    -- 初始階段判斷：rage > 0 視為下降階段，rage == 0 視為上升階段
+    local initRage = getPlayerAttr(tgt, "rage_percent") or 0
+    -- true = 下降階段（可重置），false = 上升階段（不可重置）
+    local tgtRageDescending = (initRage > 0)
+
+    -- 趨勢偵測用的取樣記錄
+    local rageSamples = {}         -- 最近幾次取樣值
+    local SAMPLE_MAX = 8           -- 保留最近 8 筆（約 0.4s）
+    local DESCENT_THRESHOLD = 5    -- rage 比最高點低超過此值 → 確認下降趨勢
+    local lastSampleTime = 0
+
+    local function addRageSample(r)
+        table.insert(rageSamples, r)
+        if #rageSamples > SAMPLE_MAX then
+            table.remove(rageSamples, 1)
+        end
+    end
+
+    -- 在 samples 中找最高值
+    local function samplesMax()
+        local m = 0
+        for _, v in ipairs(rageSamples) do
+            if v > m then m = v end
+        end
+        return m
+    end
 
     -- 取得 LastSlappedBy 物件參考
     local function getLastSlappedByObj()
@@ -827,6 +870,9 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
     end
 
     local lastSlappedByObj = getLastSlappedByObj()
+
+    -- 初始化取樣
+    addRageSample(initRage)
 
     while toggles.helpTarget do
         if not (hrp and hrp.Parent) then break end
@@ -848,12 +894,42 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
 
         pullNearbyBlast(hrp)
 
-        -- 重新嘗試取得 LastSlappedBy（可能在死亡後重建）
+        -- 每 0.05s 取樣一次 rage（搭配 task.wait(0.05)）
+        local now = tick()
+        if now - lastSampleTime >= 0.05 then
+            local tgtRage = getPlayerAttr(tgt, "rage_percent") or 0
+            addRageSample(tgtRage)
+            lastSampleTime = now
+
+            -- 階段判斷
+            if not tgtRageDescending then
+                -- 上升階段：rage 到達 100 才切換為下降階段
+                if tgtRage >= 100 then
+                    tgtRageDescending = true
+                    rageSamples = {}  -- 重置取樣，避免舊資料干擾
+                    addRageSample(tgtRage)
+                end
+            else
+                -- 下降階段：rage 降到 0 → 切換為上升階段
+                if tgtRage == 0 then
+                    tgtRageDescending = false
+                    rageSamples = {}
+                    addRageSample(0)
+                else
+                    -- 用趨勢確認：若 rage 比樣本最高值高出超多（純上升，沒有下降趨勢）
+                    -- 則不改變旗標，因為允許偶爾突刺+20
+                    -- 只要最近樣本中有明顯下降（最高 - 目前 > threshold）就維持下降階段
+                    -- （此處僅在 rage==0 時才切換，中途不切換，符合需求）
+                end
+            end
+        end
+
+        -- 重新嘗試取得 LastSlappedBy
         if not lastSlappedByObj or not lastSlappedByObj.Parent then
             lastSlappedByObj = getLastSlappedByObj()
         end
 
-        -- 偵測是否被幫助目標打到
+        -- 偵測是否被幫助目標打到（新出現）
         local currentSlappedBy = ""
         pcall(function()
             if lastSlappedByObj then
@@ -861,30 +937,18 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
             end
         end)
 
-        -- LastSlappedBy 有幫助目標的名稱（新出現）
         if currentSlappedBy == tgt.Name and currentSlappedBy ~= lastSlappedByValue then
             lastSlappedByValue = currentSlappedBy
 
-            -- 先檢查幫助目標的 rage_percent
-            -- 若幫助目標 rage_percent == 0，等他打到 100 後再重置
-            local tgtRage = getPlayerAttr(tgt, "rage_percent") or 0
-            if tgtRage == 0 then
-                -- 等目標 rage 回到 100
-                local waitTimeout = tick() + 60
-                while toggles.helpTarget and tick() < waitTimeout do
-                    local r = getPlayerAttr(tgt, "rage_percent") or 0
-                    if r >= 100 then break end
-                    task.wait(0.2)
-                end
-                if not toggles.helpTarget then break end
+            -- 只在下降階段（100→0 過程）才重置
+            if tgtRageDescending then
+                pcall(function()
+                    Players.LocalPlayer.Reset:FireServer()
+                end)
+                task.wait(0.1)
+                break  -- hrp/hum 失效，主流程重新啟動
             end
-
-            -- 重置自己
-            pcall(function()
-                Players.LocalPlayer.Reset:FireServer()
-            end)
-            task.wait(0.1)
-            break  -- hrp/hum 失效，主流程重新啟動
+            -- 上升階段被打：忽略
         end
 
         task.wait(0.05)
@@ -993,7 +1057,7 @@ helpTargetButton.MouseButton1Click:Connect(function()
 
         helpTargetButton.Text = "解除"
         helpTargetButton.BackgroundColor3 = THEME.red
-        helpTargetFrame.BackgroundColor3 = Color3.fromRGB(20, 16, 40)
+        helpTargetFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
     else
         helpTargetInfo.Text = "目標: 無"
         helpTargetInfo.TextColor3 = THEME.textMuted
@@ -1119,7 +1183,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的憤怒精通腳本 v0.1 已載入!")
+print("貓玲的憤怒精通腳本 v0.3 已載入!")
 print("攻擊者功能:")
 print("  自動攻擊: rage<100→GRRRR(Left Arm) 每0.8s | rage=100→GRRRRR(frenzy) | 等rage降至最低憤怒值後繼續")
 print("  固定位置: 鎖定當前 CFrame")
