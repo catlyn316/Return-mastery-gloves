@@ -9,8 +9,14 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 清理舊GUI
-if CoreGui:FindFirstChild("LunarMasterUI") then CoreGui.LunarMasterUI:Destroy() end
-if playerGui:FindFirstChild("LunarMasterUI") then playerGui.LunarMasterUI:Destroy() end
+pcall(function() if CoreGui:FindFirstChild("LunarMasterUI") then CoreGui.LunarMasterUI:Destroy() end end)
+pcall(function() if playerGui:FindFirstChild("LunarMasterUI") then playerGui.LunarMasterUI:Destroy() end end)
+pcall(function()
+    if type(gethui) == "function" then
+        local hui = gethui()
+        if hui and hui:FindFirstChild("LunarMasterUI") then hui.LunarMasterUI:Destroy() end
+    end
+end)
 
 -- 變數
 local toggles = {
@@ -124,19 +130,6 @@ local function getSelfAttr(name)
     return pcall(function() return char:GetAttribute(name) end) and char:GetAttribute(name) or nil
 end
 
--- 安全 FireServer
-local function fireServer(remoteNameOrPath, ...)
-    pcall(function()
-        local remote
-        if type(remoteNameOrPath) == "string" then
-            remote = ReplicatedStorage:FindFirstChild(remoteNameOrPath, true)
-        else
-            remote = remoteNameOrPath
-        end
-        if remote then remote:FireServer(...) end
-    end)
-end
-
 -- ============================================================
 -- UI 建構
 -- ============================================================
@@ -148,12 +141,25 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 screenGui.DisplayOrder = 10001
 
 local function parentUI(g)
-    local ok = pcall(function()
-        if gethui then g.Parent = gethui()
-        elseif CoreGui then g.Parent = CoreGui
-        else g.Parent = playerGui end
-    end)
-    if not ok then g.Parent = playerGui end
+    -- 依序嘗試：gethui → CoreGui → playerGui
+    local ok = false
+    if not ok then
+        ok = pcall(function()
+            if type(gethui) == "function" then
+                g.Parent = gethui()
+            else
+                error("no gethui")
+            end
+        end)
+    end
+    if not ok then
+        ok = pcall(function()
+            g.Parent = CoreGui
+        end)
+    end
+    if not ok then
+        g.Parent = playerGui
+    end
 end
 parentUI(screenGui)
 
