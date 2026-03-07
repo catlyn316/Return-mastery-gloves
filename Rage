@@ -1,4 +1,4 @@
--- 貓玲的憤怒精通腳本 v0.3
+-- 貓玲的憤怒精通腳本 v0.4
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -709,7 +709,7 @@ helpModeButton.MouseButton1Click:Connect(function()
     if values.helpMode == "被打時重置" then
         values.helpMode = "被打後不重置"
         helpModeButton.Text = "被打後不重置"
-        helpModeButton.BackgroundColor3 = Color3.fromRGB(130, 50, 140)
+        helpModeButton.BackgroundColor3 = Color3.fromRGB(60, 130, 80)
         values.helpDistance = 5
         helpDistanceInput.Text = "5"
     else
@@ -819,45 +819,16 @@ end
 
 -- ============================================================
 -- 幫助者位置迴圈：被打時重置
--- 用趨勢判斷 rage 所處階段：
---   下降階段（100→0）：一段時間內 rage 有下降趨勢（允許偶爾+20的突刺）→ 可重置
---   上升階段（0→100）：一段時間內 rage 只升不降 → 不可重置
--- 判斷邏輯：每 0.3s 取樣一次 rage，維持一個滑動最低值
---   若目前 rage < 最近記錄的最高值 - 閾值(5) → 確認下降趨勢 → 可重置
---   若 rage == 0 → 切換為上升階段
---   若上升階段中 rage >= 100 → 切換回下降階段
+--
+-- 階段判斷（每 0.1s 取樣一次，保留最近 5 筆）：
+--   5 筆中只要有任何一次「當前值 < 前一值」→ 下降階段（可重置）
+--   5 筆全部是上升或持平（純 0→100 爬升）→ 上升階段（不可重置）
+--   另外：偵測到 rage == 0 強制切換為上升階段
+--         偵測到 rage >= 100 強制切換為下降階段
 -- ============================================================
 local function runHelpLoopSlappedReset(hrp, hum, tgt)
     local lastSlappedByValue = ""
 
-    -- 初始階段判斷：rage > 0 視為下降階段，rage == 0 視為上升階段
-    local initRage = getPlayerAttr(tgt, "rage_percent") or 0
-    -- true = 下降階段（可重置），false = 上升階段（不可重置）
-    local tgtRageDescending = (initRage > 0)
-
-    -- 趨勢偵測用的取樣記錄
-    local rageSamples = {}         -- 最近幾次取樣值
-    local SAMPLE_MAX = 8           -- 保留最近 8 筆（約 0.4s）
-    local DESCENT_THRESHOLD = 5    -- rage 比最高點低超過此值 → 確認下降趨勢
-    local lastSampleTime = 0
-
-    local function addRageSample(r)
-        table.insert(rageSamples, r)
-        if #rageSamples > SAMPLE_MAX then
-            table.remove(rageSamples, 1)
-        end
-    end
-
-    -- 在 samples 中找最高值
-    local function samplesMax()
-        local m = 0
-        for _, v in ipairs(rageSamples) do
-            if v > m then m = v end
-        end
-        return m
-    end
-
-    -- 取得 LastSlappedBy 物件參考
     local function getLastSlappedByObj()
         local result = nil
         pcall(function()
@@ -871,8 +842,33 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
 
     local lastSlappedByObj = getLastSlappedByObj()
 
-    -- 初始化取樣
-    addRageSample(initRage)
+    -- 初始階段
+    local initRage = getPlayerAttr(tgt, "rage_percent") or 0
+    local tgtRageDescending = (initRage > 0)
+
+    -- 取樣視窗（最近 5 筆，每 0.1s 一次）
+    local WINDOW = 5
+    local samples = {}
+    local sampleTimer = 0
+
+    local function pushSample(r)
+        table.insert(samples, r)
+        if #samples > WINDOW then
+            table.remove(samples, 1)
+        end
+    end
+
+    -- 判斷視窗內是否有任何一次下降
+    local function hasAnyDrop()
+        for i = 2, #samples do
+            if samples[i] < samples[i-1] then
+                return true
+            end
+        end
+        return false
+    end
+
+    pushSample(initRage)
 
     while toggles.helpTarget do
         if not (hrp and hrp.Parent) then break end
@@ -894,32 +890,24 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
 
         pullNearbyBlast(hrp)
 
-        -- 每 0.05s 取樣一次 rage（搭配 task.wait(0.05)）
-        local now = tick()
-        if now - lastSampleTime >= 0.05 then
+        -- 每 0.1s 取樣一次並更新階段判斷
+        sampleTimer = sampleTimer + 0.05
+        if sampleTimer >= 0.1 then
+            sampleTimer = 0
             local tgtRage = getPlayerAttr(tgt, "rage_percent") or 0
-            addRageSample(tgtRage)
-            lastSampleTime = now
+            pushSample(tgtRage)
 
-            -- 階段判斷
-            if not tgtRageDescending then
-                -- 上升階段：rage 到達 100 才切換為下降階段
-                if tgtRage >= 100 then
+            -- 邊界強制切換（確保不漏掉）
+            if tgtRage >= 100 then
+                tgtRageDescending = true
+            elseif tgtRage == 0 then
+                tgtRageDescending = false
+            elseif #samples >= 3 then
+                -- 視窗內有任何下降 → 下降階段；全部上升或持平 → 上升階段
+                if hasAnyDrop() then
                     tgtRageDescending = true
-                    rageSamples = {}  -- 重置取樣，避免舊資料干擾
-                    addRageSample(tgtRage)
-                end
-            else
-                -- 下降階段：rage 降到 0 → 切換為上升階段
-                if tgtRage == 0 then
-                    tgtRageDescending = false
-                    rageSamples = {}
-                    addRageSample(0)
                 else
-                    -- 用趨勢確認：若 rage 比樣本最高值高出超多（純上升，沒有下降趨勢）
-                    -- 則不改變旗標，因為允許偶爾突刺+20
-                    -- 只要最近樣本中有明顯下降（最高 - 目前 > threshold）就維持下降階段
-                    -- （此處僅在 rage==0 時才切換，中途不切換，符合需求）
+                    tgtRageDescending = false
                 end
             end
         end
@@ -940,15 +928,13 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
         if currentSlappedBy == tgt.Name and currentSlappedBy ~= lastSlappedByValue then
             lastSlappedByValue = currentSlappedBy
 
-            -- 只在下降階段（100→0 過程）才重置
             if tgtRageDescending then
                 pcall(function()
                     Players.LocalPlayer.Reset:FireServer()
                 end)
                 task.wait(0.1)
-                break  -- hrp/hum 失效，主流程重新啟動
+                break
             end
-            -- 上升階段被打：忽略
         end
 
         task.wait(0.05)
@@ -1183,7 +1169,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的憤怒精通腳本 v0.3 已載入!")
+print("貓玲的憤怒精通腳本 v0.4 已載入!")
 print("攻擊者功能:")
 print("  自動攻擊: rage<100→GRRRR(Left Arm) 每0.8s | rage=100→GRRRRR(frenzy) | 等rage降至最低憤怒值後繼續")
 print("  固定位置: 鎖定當前 CFrame")
