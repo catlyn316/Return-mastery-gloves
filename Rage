@@ -1,4 +1,4 @@
--- 貓玲的憤怒精通腳本 v0.4
+-- 貓玲的憤怒精通腳本 v0.5
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -820,59 +820,99 @@ end
 -- ============================================================
 -- 幫助者位置迴圈：被打時重置
 --
+-- 偵測方式：監聽 Workspace.自己名.Ragdolled 從 false→true
+-- （被攻擊者打到會進入 ragdoll，這個值每次都真的改變）
+-- 再確認 LastSlappedBy == tgt.Name 才執行重置
+--
 -- 階段判斷（每 0.1s 取樣一次，保留最近 5 筆）：
 --   5 筆中只要有任何一次「當前值 < 前一值」→ 下降階段（可重置）
---   5 筆全部是上升或持平（純 0→100 爬升）→ 上升階段（不可重置）
---   另外：偵測到 rage == 0 強制切換為上升階段
---         偵測到 rage >= 100 強制切換為下降階段
+--   5 筆全部上升或持平 → 上升階段（不可重置）
+--   偵測到 rage >= 100 → 強制下降階段
+--   偵測到 rage == 0  → 強制上升階段
 -- ============================================================
 local function runHelpLoopSlappedReset(hrp, hum, tgt)
-    local lastSlappedByValue = ""
 
-    local function getLastSlappedByObj()
-        local result = nil
-        pcall(function()
-            local folder = Workspace:FindFirstChild(player.Name)
-            if folder then
-                result = folder:FindFirstChild("LastSlappedBy")
-            end
-        end)
-        return result
-    end
+    -- 取得自己的 Ragdolled 物件
+    local ragdolledObj = nil
+    pcall(function()
+        local folder = Workspace:FindFirstChild(player.Name)
+        if folder then
+            ragdolledObj = folder:FindFirstChild("Ragdolled")
+        end
+    end)
 
-    local lastSlappedByObj = getLastSlappedByObj()
+    -- 取得 LastSlappedBy 物件（只用來確認是誰打的）
+    local lastSlappedByObj = nil
+    pcall(function()
+        local folder = Workspace:FindFirstChild(player.Name)
+        if folder then
+            lastSlappedByObj = folder:FindFirstChild("LastSlappedBy")
+        end
+    end)
 
     -- 初始階段
     local initRage = getPlayerAttr(tgt, "rage_percent") or 0
     local tgtRageDescending = (initRage > 0)
 
-    -- 取樣視窗（最近 5 筆，每 0.1s 一次）
+    -- 取樣視窗
     local WINDOW = 5
     local samples = {}
     local sampleTimer = 0
 
     local function pushSample(r)
         table.insert(samples, r)
-        if #samples > WINDOW then
-            table.remove(samples, 1)
-        end
+        if #samples > WINDOW then table.remove(samples, 1) end
     end
 
-    -- 判斷視窗內是否有任何一次下降
     local function hasAnyDrop()
         for i = 2, #samples do
-            if samples[i] < samples[i-1] then
-                return true
-            end
+            if samples[i] < samples[i-1] then return true end
         end
         return false
     end
 
     pushSample(initRage)
 
+    -- 用 Ragdolled.Changed 偵測被打（false→true 時觸發）
+    local gotHit = false
+    local ragdolledConn = nil
+
+    local function setupRagdolledConn()
+        if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
+        if not ragdolledObj or not ragdolledObj.Parent then return end
+        ragdolledConn = ragdolledObj.Changed:Connect(function(newVal)
+            if newVal == true then
+                -- 確認是幫助目標打的
+                local slappedBy = ""
+                pcall(function()
+                    if lastSlappedByObj and lastSlappedByObj.Parent then
+                        slappedBy = tostring(lastSlappedByObj.Value) or ""
+                    end
+                end)
+                if slappedBy == tgt.Name then
+                    gotHit = true
+                end
+            end
+        end)
+    end
+
+    setupRagdolledConn()
+
     while toggles.helpTarget do
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
+
+        -- 若 Ragdolled 物件失效，重新取得並重新綁定
+        if not ragdolledObj or not ragdolledObj.Parent then
+            pcall(function()
+                local folder = Workspace:FindFirstChild(player.Name)
+                if folder then
+                    ragdolledObj = folder:FindFirstChild("Ragdolled")
+                    lastSlappedByObj = folder:FindFirstChild("LastSlappedBy")
+                end
+            end)
+            setupRagdolledConn()
+        end
 
         -- 固定位置
         pcall(function()
@@ -890,45 +930,28 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
 
         pullNearbyBlast(hrp)
 
-        -- 每 0.1s 取樣一次並更新階段判斷
+        -- 每 0.1s 取樣並更新階段
         sampleTimer = sampleTimer + 0.05
         if sampleTimer >= 0.1 then
             sampleTimer = 0
             local tgtRage = getPlayerAttr(tgt, "rage_percent") or 0
             pushSample(tgtRage)
 
-            -- 邊界強制切換（確保不漏掉）
             if tgtRage >= 100 then
                 tgtRageDescending = true
             elseif tgtRage == 0 then
                 tgtRageDescending = false
             elseif #samples >= 3 then
-                -- 視窗內有任何下降 → 下降階段；全部上升或持平 → 上升階段
-                if hasAnyDrop() then
-                    tgtRageDescending = true
-                else
-                    tgtRageDescending = false
-                end
+                tgtRageDescending = hasAnyDrop()
             end
         end
 
-        -- 重新嘗試取得 LastSlappedBy
-        if not lastSlappedByObj or not lastSlappedByObj.Parent then
-            lastSlappedByObj = getLastSlappedByObj()
-        end
-
-        -- 偵測是否被幫助目標打到（新出現）
-        local currentSlappedBy = ""
-        pcall(function()
-            if lastSlappedByObj then
-                currentSlappedBy = tostring(lastSlappedByObj.Value) or ""
-            end
-        end)
-
-        if currentSlappedBy == tgt.Name and currentSlappedBy ~= lastSlappedByValue then
-            lastSlappedByValue = currentSlappedBy
+        -- 被幫助目標打到了（Ragdolled Changed 觸發）
+        if gotHit then
+            gotHit = false
 
             if tgtRageDescending then
+                if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
                 pcall(function()
                     Players.LocalPlayer.Reset:FireServer()
                 end)
@@ -939,6 +962,9 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt)
 
         task.wait(0.05)
     end
+
+    -- 清理連線
+    if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
 end
 
 -- ============================================================
@@ -1169,7 +1195,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的憤怒精通腳本 v0.4 已載入!")
+print("貓玲的憤怒精通腳本 v0.5 已載入!")
 print("攻擊者功能:")
 print("  自動攻擊: rage<100→GRRRR(Left Arm) 每0.8s | rage=100→GRRRRR(frenzy) | 等rage降至最低憤怒值後繼續")
 print("  固定位置: 鎖定當前 CFrame")
