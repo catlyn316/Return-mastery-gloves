@@ -1,4 +1,4 @@
--- 貓玲的憤怒精通腳本 v0.7
+-- 貓玲的憤怒精通腳本 v0.8
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -1108,9 +1108,16 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 if not hrp then task.wait(0.5) continue end
                 if not toggles.helpTarget then break end
 
+                -- 死亡後傳送前：暫時解除固定，讓距離偵測能取得真實位置
+                local savedFixedCFrame = values.fixedCFrame
+                values.fixedCFrame = nil
+
                 teleportToLobby(hrp)
                 task.wait(0.5)
                 if not toggles.helpTarget then break end
+
+                -- 傳到 Teleport1 後恢復固定位置記錄（傳送到目標時會覆寫）
+                values.fixedCFrame = savedFixedCFrame
 
                 -- 傳送到目標，若5秒內沒成功則重新開始
                 local teleportSuccess = false
@@ -1131,22 +1138,27 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 if not toggles.helpTarget then break end
                 if not teleportSuccess then continue end
 
-                -- 幫助迴圈：同時監控是否卡在 LobbyRamp 超過 5 秒
-                -- lobbyStuck = true 時中斷幫助迴圈，跳回 teleport1 步驟（不重生）
+                -- 幫助迴圈：同時監控是否卡住（原地不動≤10單位 且 LobbyRamp 50單位內）超過 5 秒
                 local lobbyStuck = false
                 local helpDone = false
                 local lobbyStuckTimer = 0
+                local lastCheckPos = nil
 
                 local lobbyStuckLoop = task.spawn(function()
                     while not helpDone and toggles.helpTarget do
                         local myPos = hrp and hrp.Parent and hrp.Position
                         if myPos then
-                            local stuck = false
+                            if not lastCheckPos then lastCheckPos = myPos end
+
+                            local moved = (myPos - lastCheckPos).Magnitude
+                            local notMoving = moved <= 10
+
+                            local nearRamp = false
+                            local nearestDist = math.huge
                             pcall(function()
                                 local lobby = Workspace:FindFirstChild("Lobby")
                                 if lobby then
                                     for _, obj in ipairs(lobby:GetChildren()) do
-                                        -- 只偵測名稱為 LobbyRamp 的物件（兩個都偵測）
                                         if obj.Name == "LobbyRamp" then
                                             local parts = {}
                                             if obj:IsA("BasePart") then
@@ -1157,28 +1169,70 @@ helpTargetButton.MouseButton1Click:Connect(function()
                                                 end
                                             end
                                             for _, part in ipairs(parts) do
-                                                local dist = (part.Position - myPos).Magnitude
-                                                -- 碰觸（dist < 尺寸一半+2）或 50 單位內都算
-                                                if dist <= 50 then
-                                                    stuck = true
-                                                    break
-                                                end
+                                                local d = (part.Position - myPos).Magnitude
+                                                if d < nearestDist then nearestDist = d end
+                                                if d <= 50 then nearRamp = true end
                                             end
                                         end
-                                        if stuck then break end
+                                        if nearRamp then break end
                                     end
                                 end
                             end)
 
-                            if stuck then
+                            print(string.format("[卡住偵測] 移動:%.1f 原地:%s | 最近Ramp:%.1f 在範圍:%s | 計時:%.1f/5",
+                                moved, tostring(notMoving), nearestDist, tostring(nearRamp), lobbyStuckTimer))
+
+                            if notMoving and nearRamp then
                                 lobbyStuckTimer = lobbyStuckTimer + 0.2
                                 if lobbyStuckTimer >= 5 then
+                                    print("[卡住偵測] ⚠️ 觸發！傳回 Teleport1")
                                     lobbyStuck = true
                                     helpDone = true
                                 end
                             else
+                                if lobbyStuckTimer > 0 then
+                                    print("[卡住偵測] 重置計時（移動或離開範圍）")
+                                end
                                 lobbyStuckTimer = 0
+                                lastCheckPos = myPos
                             end
+                        end
+                        task.wait(0.2)
+                    end
+                end)
+
+                -- 第二偵測：沒有 Tool 超過 5 秒 → 傳回 Teleport1
+                local noToolTimer = 0
+                local noToolLoop = task.spawn(function()
+                    while not helpDone and toggles.helpTarget do
+                        local character = player.Character
+                        local hasTool = false
+                        if character then
+                            for _, obj in ipairs(character:GetChildren()) do
+                                if obj:IsA("Tool") then hasTool = true break end
+                            end
+                            -- 也檢查 Backpack
+                            local bp = player:FindFirstChildOfClass("Backpack")
+                            if bp then
+                                for _, obj in ipairs(bp:GetChildren()) do
+                                    if obj:IsA("Tool") then hasTool = true break end
+                                end
+                            end
+                        end
+
+                        if not hasTool then
+                            noToolTimer = noToolTimer + 0.2
+                            print(string.format("[無Tool偵測] 沒有Tool | 計時:%.1f/2", noToolTimer))
+                            if noToolTimer >= 2 then
+                                print("[無Tool偵測] ⚠️ 觸發！傳回 Teleport1")
+                                lobbyStuck = true
+                                helpDone = true
+                            end
+                        else
+                            if noToolTimer > 0 then
+                                print("[無Tool偵測] 有Tool，重置計時")
+                            end
+                            noToolTimer = 0
                         end
                         task.wait(0.2)
                     end
@@ -1208,6 +1262,7 @@ helpTargetButton.MouseButton1Click:Connect(function()
 
                 helpDone = true
                 task.cancel(lobbyStuckLoop)
+                task.cancel(noToolLoop)
 
                 if lobbyStuck and toggles.helpTarget then
                     -- 卡住了：直接傳回 Teleport1，不重生，繼續外層迴圈
@@ -1346,7 +1401,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的憤怒精通腳本 v0.7 已載入!")
+print("貓玲的憤怒精通腳本 v0.8 已載入!")
 print("攻擊者功能:")
 print("  自動攻擊: rage<100→GRRRR(Left Arm) 每0.8s | rage=100→GRRRRR(frenzy) | 等rage降至最低憤怒值後繼續")
 print("  固定位置: 鎖定當前 CFrame")
