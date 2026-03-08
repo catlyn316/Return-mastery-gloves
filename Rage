@@ -654,6 +654,23 @@ end
 local function runAttackerLoop()
     local frenzyActive = false
 
+    -- 自己怒氣值趨勢偵測（階段C用）
+    local rageSamples = {}
+    local RAGE_WINDOW = 5
+    local rageTimer = 0
+
+    local function pushRageSample(r)
+        table.insert(rageSamples, r)
+        if #rageSamples > RAGE_WINDOW then table.remove(rageSamples, 1) end
+    end
+
+    local function selfRageHasAnyDrop()
+        for i = 2, #rageSamples do
+            if rageSamples[i] < rageSamples[i-1] then return true end
+        end
+        return false
+    end
+
     while toggles.attacker do
         local char = player.Character
         if not char then task.wait(0.2) continue end
@@ -662,6 +679,7 @@ local function runAttackerLoop()
 
         if not frenzyActive then
             -- 【階段A】rage 從 0 爬到 100，每 attackInterval 秒攻擊一次
+            rageSamples = {}  -- 重置取樣
             if rage < 100 then
                 local leftArm = getNearestTargetLeftArm()
                 if leftArm then
@@ -684,6 +702,21 @@ local function runAttackerLoop()
 
         else
             -- 【階段C】frenzy 中
+            -- 每 0.1s 取樣自己怒氣值，偵測趨勢
+            rageTimer = rageTimer + 0.05
+            if rageTimer >= 0.1 then
+                rageTimer = 0
+                pushRageSample(rage)
+
+                -- 若樣本夠且不再下降（全部上升或持平）→ 視為遊戲已切回階段A
+                if #rageSamples >= RAGE_WINDOW and not selfRageHasAnyDrop() then
+                    frenzyActive = false
+                    rageSamples = {}
+                    task.wait(0.05)
+                    continue
+                end
+            end
+
             if rage <= values.minRage and rage > 0 then
                 if hasTargetNearby() then
                     local leftArm = getNearestTargetLeftArm()
@@ -693,12 +726,10 @@ local function runAttackerLoop()
                 end
                 task.wait(values.attackInterval)
 
-                -- 攻擊後檢查 rage 狀態
+                -- 攻擊後若 rage 回到 minRage 以上，等它再次降下來
                 local c = player.Character
                 local r = (c and c:GetAttribute("rage_percent")) or 0
-
                 if r > values.minRage then
-                    -- rage 已回到 minRage 以上，等它再次降到 minRage 以下才繼續打
                     while toggles.attacker do
                         local c2 = player.Character
                         local r2 = (c2 and c2:GetAttribute("rage_percent")) or 0
@@ -706,7 +737,6 @@ local function runAttackerLoop()
                         task.wait(0.05)
                     end
                 end
-                -- 若 rage 還在 1~minRage，下一輪繼續打
 
             else
                 -- rage > minRage，等
@@ -1101,11 +1131,54 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 if not toggles.helpTarget then break end
                 if not teleportSuccess then continue end
 
+                -- 幫助迴圈：同時監控是否卡在 Lobby 物件上超過 5 秒
+                local helpDone = false
+                local lobbyStuckConn = nil
+
+                -- 啟動 Lobby 卡住偵測
+                local lobbyStuckTimer = 0
+                local lobbyStuckLoop = task.spawn(function()
+                    while not helpDone and toggles.helpTarget do
+                        local myPos = hrp and hrp.Parent and hrp.Position
+                        if myPos then
+                            local touching = false
+                            pcall(function()
+                                local lobby = Workspace:FindFirstChild("Lobby")
+                                if lobby then
+                                    for _, obj in ipairs(lobby:GetDescendants()) do
+                                        if obj:IsA("BasePart") then
+                                            local dist = (obj.Position - myPos).Magnitude
+                                            -- 用 TouchingParts 或距離判斷接觸（距離 < 3 視為碰觸）
+                                            if dist < (obj.Size.Magnitude / 2 + 2) then
+                                                touching = true
+                                                break
+                                            end
+                                        end
+                                    end
+                                end
+                            end)
+                            if touching then
+                                lobbyStuckTimer = lobbyStuckTimer + 0.2
+                                if lobbyStuckTimer >= 5 then
+                                    helpDone = true  -- 觸發重新開始
+                                end
+                            else
+                                lobbyStuckTimer = 0  -- 沒碰就重置計時
+                            end
+                        end
+                        task.wait(0.2)
+                    end
+                end)
+
                 if values.helpMode == "被打後不重置" then
                     runHelpLoopNoReset(hrp, hum, tgt)
                 else
                     runHelpLoopSlappedReset(hrp, hum, tgt)
                 end
+
+                helpDone = true  -- 通知 lobbyStuckLoop 停止
+                task.cancel(lobbyStuckLoop)
+                -- 若是 lobbyStuck 觸發的，重新執行外層迴圈（重生→傳送）
             end
         end)
 
