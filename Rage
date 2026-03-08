@@ -1,4 +1,4 @@
--- 貓玲的憤怒精通腳本 v0.6
+-- 貓玲的憤怒精通腳本 v0.7
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -1131,54 +1131,90 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 if not toggles.helpTarget then break end
                 if not teleportSuccess then continue end
 
-                -- 幫助迴圈：同時監控是否卡在 Lobby 物件上超過 5 秒
+                -- 幫助迴圈：同時監控是否卡在 LobbyRamp 超過 5 秒
+                -- lobbyStuck = true 時中斷幫助迴圈，跳回 teleport1 步驟（不重生）
+                local lobbyStuck = false
                 local helpDone = false
-                local lobbyStuckConn = nil
-
-                -- 啟動 Lobby 卡住偵測
                 local lobbyStuckTimer = 0
+
                 local lobbyStuckLoop = task.spawn(function()
                     while not helpDone and toggles.helpTarget do
                         local myPos = hrp and hrp.Parent and hrp.Position
                         if myPos then
-                            local touching = false
+                            local stuck = false
                             pcall(function()
                                 local lobby = Workspace:FindFirstChild("Lobby")
                                 if lobby then
-                                    for _, obj in ipairs(lobby:GetDescendants()) do
-                                        if obj:IsA("BasePart") then
-                                            local dist = (obj.Position - myPos).Magnitude
-                                            -- 用 TouchingParts 或距離判斷接觸（距離 < 3 視為碰觸）
-                                            if dist < (obj.Size.Magnitude / 2 + 2) then
-                                                touching = true
-                                                break
+                                    for _, obj in ipairs(lobby:GetChildren()) do
+                                        -- 只偵測名稱為 LobbyRamp 的物件（兩個都偵測）
+                                        if obj.Name == "LobbyRamp" then
+                                            local parts = {}
+                                            if obj:IsA("BasePart") then
+                                                table.insert(parts, obj)
+                                            else
+                                                for _, p in ipairs(obj:GetDescendants()) do
+                                                    if p:IsA("BasePart") then table.insert(parts, p) end
+                                                end
+                                            end
+                                            for _, part in ipairs(parts) do
+                                                local dist = (part.Position - myPos).Magnitude
+                                                -- 碰觸（dist < 尺寸一半+2）或 50 單位內都算
+                                                if dist <= 50 then
+                                                    stuck = true
+                                                    break
+                                                end
                                             end
                                         end
+                                        if stuck then break end
                                     end
                                 end
                             end)
-                            if touching then
+
+                            if stuck then
                                 lobbyStuckTimer = lobbyStuckTimer + 0.2
                                 if lobbyStuckTimer >= 5 then
-                                    helpDone = true  -- 觸發重新開始
+                                    lobbyStuck = true
+                                    helpDone = true
                                 end
                             else
-                                lobbyStuckTimer = 0  -- 沒碰就重置計時
+                                lobbyStuckTimer = 0
                             end
                         end
                         task.wait(0.2)
                     end
                 end)
 
+                -- 幫助迴圈（加入 lobbyStuck 中斷檢查）
                 if values.helpMode == "被打後不重置" then
-                    runHelpLoopNoReset(hrp, hum, tgt)
+                    -- 在另一個 task 跑幫助迴圈，主線等待它結束或 lobbyStuck
+                    local helpConn = task.spawn(function()
+                        runHelpLoopNoReset(hrp, hum, tgt)
+                        helpDone = true
+                    end)
+                    while not helpDone and toggles.helpTarget do
+                        task.wait(0.1)
+                    end
+                    task.cancel(helpConn)
                 else
-                    runHelpLoopSlappedReset(hrp, hum, tgt)
+                    local helpConn = task.spawn(function()
+                        runHelpLoopSlappedReset(hrp, hum, tgt)
+                        helpDone = true
+                    end)
+                    while not helpDone and toggles.helpTarget do
+                        task.wait(0.1)
+                    end
+                    task.cancel(helpConn)
                 end
 
-                helpDone = true  -- 通知 lobbyStuckLoop 停止
+                helpDone = true
                 task.cancel(lobbyStuckLoop)
-                -- 若是 lobbyStuck 觸發的，重新執行外層迴圈（重生→傳送）
+
+                if lobbyStuck and toggles.helpTarget then
+                    -- 卡住了：直接傳回 Teleport1，不重生，繼續外層迴圈
+                    teleportToLobby(hrp)
+                    task.wait(0.5)
+                    -- continue 讓外層重新傳送到目標
+                end
             end
         end)
 
@@ -1310,7 +1346,7 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的憤怒精通腳本 v0.6 已載入!")
+print("貓玲的憤怒精通腳本 v0.7 已載入!")
 print("攻擊者功能:")
 print("  自動攻擊: rage<100→GRRRR(Left Arm) 每0.8s | rage=100→GRRRRR(frenzy) | 等rage降至最低憤怒值後繼續")
 print("  固定位置: 鎖定當前 CFrame")
