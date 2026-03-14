@@ -45,20 +45,21 @@ local savedPosition    = nil
 -- 主題色（與憤怒精通相同）
 local THEME = {
     primary     = Color3.fromRGB(220,  80,  30),
-    primaryDark = Color3.fromRGB(160,  45,  15),
-    accent      = Color3.fromRGB(255, 160,  60),
-    bg          = Color3.fromRGB(14,  10,   8),
-    bgPanel     = Color3.fromRGB(22,  14,  10),
-    bgRow       = Color3.fromRGB(32,  20,  14),
-    bgInput     = Color3.fromRGB(46,  28,  18),
-    titleBg     = Color3.fromRGB(28,  16,  10),
-    tabBg       = Color3.fromRGB(38,  24,  16),
-    tabActive   = Color3.fromRGB(80,  38,  20),
-    textMain    = Color3.fromRGB(255, 230, 200),
-    textSub     = Color3.fromRGB(220, 170, 110),
-    textMuted   = Color3.fromRGB(140,  95,  60),
-    red         = Color3.fromRGB(220,  40,  40),
-    statusBg    = Color3.fromRGB(18,  12,   8),
+    primary     = Color3.fromRGB( 90,  90,  90),
+    primaryDark = Color3.fromRGB( 55,  55,  55),
+    accent      = Color3.fromRGB(200, 200, 200),
+    bg          = Color3.fromRGB( 10,  10,  10),
+    bgPanel     = Color3.fromRGB( 16,  16,  16),
+    bgRow       = Color3.fromRGB( 24,  24,  24),
+    bgInput     = Color3.fromRGB( 36,  36,  36),
+    titleBg     = Color3.fromRGB( 18,  18,  18),
+    tabBg       = Color3.fromRGB( 28,  28,  28),
+    tabActive   = Color3.fromRGB( 60,  60,  60),
+    textMain    = Color3.fromRGB(220, 220, 220),
+    textSub     = Color3.fromRGB(170, 170, 170),
+    textMuted   = Color3.fromRGB(100, 100, 100),
+    red         = Color3.fromRGB(200,  40,  40),
+    statusBg    = Color3.fromRGB( 14,  14,  14),
 }
 
 -- ============================================================
@@ -437,7 +438,7 @@ local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離
 -- 幫助模式（預設被打後不重置）
 local helpModeFrame, helpModeButton = createWideButtonRow(
     page2, "幫助模式:", "被打後不重置",
-    Color3.fromRGB(60, 130, 80), 3
+    Color3.fromRGB(55, 110, 70), 3
 )
 
 local fixedPosHelpFrame, fixedPosHelpStatus, fixedPosHelpButton = createRow(page2, "傳送後固定:", "啟用", "解除", 4)
@@ -477,7 +478,7 @@ local function toggleUIState(btn, frame, status, isActive, activeText, inactiveT
     if isActive then
         btn.Text = "解除"
         btn.BackgroundColor3 = THEME.red
-        frame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
+        frame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
         if status then
             status.Text = activeText or "運行中"
             status.TextColor3 = THEME.accent
@@ -513,7 +514,7 @@ fixedPosButton.MouseButton1Click:Connect(function()
             fixedPosStatus.TextColor3 = THEME.accent
             fixedPosButton.Text = "解除"
             fixedPosButton.BackgroundColor3 = THEME.red
-            fixedPosFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
+            fixedPosFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
         else
             isPosLockEnabled = false
         end
@@ -579,11 +580,11 @@ helpModeButton.MouseButton1Click:Connect(function()
     if values.helpMode == "被打後不重置" then
         values.helpMode = "被打時重置"
         helpModeButton.Text = "被打時重置"
-        helpModeButton.BackgroundColor3 = Color3.fromRGB(180, 60, 20)
+        helpModeButton.BackgroundColor3 = Color3.fromRGB(100, 55, 55)
     else
         values.helpMode = "被打後不重置"
         helpModeButton.Text = "被打後不重置"
-        helpModeButton.BackgroundColor3 = Color3.fromRGB(60, 130, 80)
+        helpModeButton.BackgroundColor3 = Color3.fromRGB(55, 110, 70)
     end
     values.helpDistance = 5
     helpDistanceInput.Text = "5"
@@ -597,7 +598,7 @@ fixedPosHelpStatus.Text = "啟用"
 fixedPosHelpStatus.TextColor3 = THEME.accent
 fixedPosHelpButton.Text = "解除"
 fixedPosHelpButton.BackgroundColor3 = THEME.red
-fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
+fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
 
 fixedPosHelpButton.MouseButton1Click:Connect(function()
     toggles.fixedPosHelp = not toggles.fixedPosHelp
@@ -606,7 +607,7 @@ fixedPosHelpButton.MouseButton1Click:Connect(function()
         fixedPosHelpStatus.TextColor3 = THEME.accent
         fixedPosHelpButton.Text = "解除"
         fixedPosHelpButton.BackgroundColor3 = THEME.red
-        fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
+        fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     else
         fixedPosHelpStatus.Text = "關閉"
         fixedPosHelpStatus.TextColor3 = THEME.textMuted
@@ -970,7 +971,7 @@ helpTargetButton.MouseButton1Click:Connect(function()
 
         helpTargetButton.Text = "解除"
         helpTargetButton.BackgroundColor3 = THEME.red
-        helpTargetFrame.BackgroundColor3 = Color3.fromRGB(28, 12, 8)
+        helpTargetFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
     else
         helpTargetInfo.Text = "目標: 無"
         helpTargetInfo.TextColor3 = THEME.textMuted
