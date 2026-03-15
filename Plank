@@ -1,10 +1,11 @@
--- 貓玲的木板精通腳本 v0.1
+-- 貓玲的木板精通腳本 v0.2
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
+local VirtualUser = game:GetService("VirtualUser")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 清理舊GUI
@@ -526,17 +527,54 @@ end)
 -- ============================================================
 -- 攻擊者主邏輯
 -- jump → GeneralHit:FireServer(最近目標.Torso) → 等 attackInterval
+-- 支援電腦（keypress空白鍵）與平板（模擬觸控跳躍按鈕）
 -- ============================================================
+
+-- 嘗試取得平板跳躍按鈕（TouchJump）
+local function getTouchJumpButton()
+    local PlayerGui = player:FindFirstChild("PlayerGui")
+    if not PlayerGui then return nil end
+    -- Roblox 預設觸控 UI 路徑
+    local touchGui = PlayerGui:FindFirstChild("TouchGui")
+    if not touchGui then return nil end
+    local touchControlFrame = touchGui:FindFirstChild("TouchControlFrame")
+    if not touchControlFrame then return nil end
+    return touchControlFrame:FindFirstChild("JumpButton")
+end
+
+local function doJump()
+    -- 方法1：平板觸控跳躍按鈕模擬
+    local jumpBtn = getTouchJumpButton()
+    if jumpBtn then
+        pcall(function()
+            local pos = jumpBtn.AbsolutePosition + jumpBtn.AbsoluteSize / 2
+            VirtualUser:TouchStart({pos}, CFrame.new())
+            task.wait(0.05)
+            VirtualUser:TouchEnd({pos}, CFrame.new())
+        end)
+        return
+    end
+
+    -- 方法2：電腦鍵盤空白鍵
+    pcall(function()
+        if type(keypress) == "function" then
+            keypress(0x20)  -- 空白鍵
+            task.wait(0.05)
+            keyrelease(0x20)
+        end
+    end)
+end
+
 local function runAttackerLoop()
     while toggles.attacker do
         local char = player.Character
         if not char then task.wait(0.2) continue end
 
-        local hum = char:FindFirstChildOfClass("Humanoid")
         local torso = getNearestTargetTorso()
 
-        if hum and torso then
-            pcall(function() hum.Jump = true end)
+        if torso then
+            doJump()
+            task.wait(0.05)
             pcall(function() ReplicatedStorage.GeneralHit:FireServer(torso) end)
         end
 
@@ -1013,4 +1051,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的木板精通腳本 v0.1 已載入!")
+print("貓玲的木板精通腳本 v0.2 已載入!")
