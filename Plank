@@ -1,11 +1,10 @@
--- 貓玲的木板精通腳本 v0.3
+-- 貓玲的木板精通腳本 v0.5
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local VirtualUser = game:GetService("VirtualUser")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- 清理舊GUI
@@ -526,56 +525,27 @@ end)
 
 -- ============================================================
 -- 攻擊者主邏輯
--- 跳躍 loop（持續不停跳）與攻擊 loop 分開並行
--- 支援電腦（keypress空白鍵）與平板（模擬觸控跳躍按鈕）
+-- 跳躍 loop（VIM SendKeyEvent Space）與攻擊 loop 並行
 -- ============================================================
 
--- 嘗試取得平板跳躍按鈕（TouchJump）
-local function getTouchJumpButton()
-    local PlayerGui = player:FindFirstChild("PlayerGui")
-    if not PlayerGui then return nil end
-    local touchGui = PlayerGui:FindFirstChild("TouchGui")
-    if not touchGui then return nil end
-    local touchControlFrame = touchGui:FindFirstChild("TouchControlFrame")
-    if not touchControlFrame then return nil end
-    return touchControlFrame:FindFirstChild("JumpButton")
-end
+local VIM = game:GetService("VirtualInputManager")
 
-local function doJump()
-    -- 方法1：平板觸控跳躍按鈕模擬
-    local jumpBtn = getTouchJumpButton()
-    if jumpBtn then
-        pcall(function()
-            local pos = jumpBtn.AbsolutePosition + jumpBtn.AbsoluteSize / 2
-            VirtualUser:TouchStart({pos}, CFrame.new())
-            task.wait(0.05)
-            VirtualUser:TouchEnd({pos}, CFrame.new())
-        end)
-        return
-    end
-    -- 方法2：電腦鍵盤空白鍵
-    pcall(function()
-        if type(keypress) == "function" then
-            keypress(0x20)
-            task.wait(0.05)
-            keyrelease(0x20)
-        end
-    end)
-end
-
--- 持續跳躍 loop（落地後馬上再跳）
+-- 持續跳躍 loop
 local function runJumpLoop()
     while toggles.attacker do
         local char = player.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
         if hum then
             local state = hum:GetState()
-            -- 只在地面狀態才跳，避免觸發防無限跳偵測
             if state == Enum.HumanoidStateType.Running
             or state == Enum.HumanoidStateType.RunningNoPhysics
             or state == Enum.HumanoidStateType.Landed
             or state == Enum.HumanoidStateType.None then
-                doJump()
+                pcall(function()
+                    VIM:SendKeyEvent(true,  Enum.KeyCode.Space, false, game)
+                    task.wait(0.05)
+                    VIM:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+                end)
             end
         end
         task.wait(0.3)
@@ -584,7 +554,6 @@ end
 
 -- 攻擊 loop
 local function runAttackerLoop()
-    -- 跳躍 loop 並行
     task.spawn(runJumpLoop)
 
     while toggles.attacker do
@@ -1069,4 +1038,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的木板精通腳本 v0.3 已載入!")
+print("貓玲的木板精通腳本 v0.5 已載入!")
