@@ -1,4 +1,4 @@
--- 貓玲的木板精通腳本 v0.2
+-- 貓玲的木板精通腳本 v0.3
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -526,7 +526,7 @@ end)
 
 -- ============================================================
 -- 攻擊者主邏輯
--- jump → GeneralHit:FireServer(最近目標.Torso) → 等 attackInterval
+-- 跳躍 loop（持續不停跳）與攻擊 loop 分開並行
 -- 支援電腦（keypress空白鍵）與平板（模擬觸控跳躍按鈕）
 -- ============================================================
 
@@ -534,7 +534,6 @@ end)
 local function getTouchJumpButton()
     local PlayerGui = player:FindFirstChild("PlayerGui")
     if not PlayerGui then return nil end
-    -- Roblox 預設觸控 UI 路徑
     local touchGui = PlayerGui:FindFirstChild("TouchGui")
     if not touchGui then return nil end
     local touchControlFrame = touchGui:FindFirstChild("TouchControlFrame")
@@ -554,27 +553,46 @@ local function doJump()
         end)
         return
     end
-
     -- 方法2：電腦鍵盤空白鍵
     pcall(function()
         if type(keypress) == "function" then
-            keypress(0x20)  -- 空白鍵
+            keypress(0x20)
             task.wait(0.05)
             keyrelease(0x20)
         end
     end)
 end
 
+-- 持續跳躍 loop（落地後馬上再跳）
+local function runJumpLoop()
+    while toggles.attacker do
+        local char = player.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local state = hum:GetState()
+            -- 只在地面狀態才跳，避免觸發防無限跳偵測
+            if state == Enum.HumanoidStateType.Running
+            or state == Enum.HumanoidStateType.RunningNoPhysics
+            or state == Enum.HumanoidStateType.Landed
+            or state == Enum.HumanoidStateType.None then
+                doJump()
+            end
+        end
+        task.wait(0.3)
+    end
+end
+
+-- 攻擊 loop
 local function runAttackerLoop()
+    -- 跳躍 loop 並行
+    task.spawn(runJumpLoop)
+
     while toggles.attacker do
         local char = player.Character
         if not char then task.wait(0.2) continue end
 
         local torso = getNearestTargetTorso()
-
         if torso then
-            doJump()
-            task.wait(0.05)
             pcall(function() ReplicatedStorage.GeneralHit:FireServer(torso) end)
         end
 
@@ -1051,4 +1069,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的木板精通腳本 v0.2 已載入!")
+print("貓玲的木板精通腳本 v0.3 已載入!")
