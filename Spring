@@ -1,4 +1,4 @@
--- 貓玲的彈簧精通腳本 v1.8
+-- 貓玲的彈簧精通腳本 v1.7
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -36,8 +36,7 @@ local connections = {
     jumpPower = nil,
     helpTarget = nil,
     respawnTeleport = nil,
-    fixedPosition = nil,
-    generalAbility = nil  -- 幫助者 GeneralAbility 連接
+    fixedPosition = nil
 }
 
 -- 輔助函數
@@ -61,6 +60,7 @@ local function isOnGround()
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return false end
     
+    -- 檢查 Humanoid 狀態
     local state = hum:GetState()
     if state ~= Enum.HumanoidStateType.Running 
        and state ~= Enum.HumanoidStateType.RunningNoPhysics 
@@ -71,6 +71,7 @@ local function isOnGround()
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
     
+    -- 使用 Raycast 檢測是否在地面
     local rayOrigin = hrp.Position
     local rayDirection = Vector3.new(0, -5, 0)
     
@@ -83,42 +84,14 @@ local function isOnGround()
     return rayResult ~= nil
 end
 
--- 輔助函數: 檢查某玩家的 Glove 是否為 "5 More"
-local function isGloveFiveMore(targetPlayer)
-    if not targetPlayer then return false end
-    local ls = targetPlayer:FindFirstChild("leaderstats")
-    if not ls then return false end
-    local glove = ls:FindFirstChild("Glove")
-    if not glove then return false end
-    return tostring(glove.Value) == "5 More"
-end
-
--- 輔助函數: 對最近目標的 _More["1"]~["5"] Torso 各打一次
-local function fireSpringHitMore(targetPlayer)
-    if not targetPlayer or not targetPlayer.Character then return end
-    local charName = targetPlayer.Name
-    -- 嘗試從 Workspace 找 charName_More 資料夾
-    local moreFolder = Workspace:FindFirstChild(charName .. "_More")
-    if moreFolder then
-        for i = 1, 5 do
-            local slot = moreFolder:FindFirstChild(tostring(i))
-            if slot then
-                local torso = slot:FindFirstChild("Torso")
-                if torso then
-                    pcall(function()
-                        ReplicatedStorage.springhit:FireServer(torso)
-                    end)
-                end
-            end
-        end
-    else
-        -- fallback: 直接打目標本體 Torso
-        local torso = targetPlayer.Character:FindFirstChild("Torso")
-        if torso then
-            pcall(function()
-                ReplicatedStorage.springhit:FireServer(torso)
-            end)
-        end
+local function makeJump()
+    local char = player.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    
+    if isOnGround() then
+        hum:ChangeState(Enum.HumanoidStateType.Jumping)
     end
 end
 
@@ -188,30 +161,17 @@ local function getPositionInFrontOfPlayer(targetPlayer, distance)
     local targetHRP = targetChar:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return nil end
     
+    -- 獲取目標的朝向
     local lookVector = targetHRP.CFrame.LookVector
     local targetPos = targetHRP.Position
     local frontPosition = targetPos + (lookVector * distance)
+    
+    -- 創建一個與目標面向相同方向的CFrame
+    -- 使用目標的LookVector作為幫助者的朝向
     local helpCFrame = CFrame.new(frontPosition, frontPosition + lookVector)
     
     return helpCFrame
 end
-
--- ============================================================
--- 幫助者 GeneralAbility 自動偵測 (每秒檢查自己的 Glove)
--- ============================================================
-local generalAbilityAccum = 0
-
-connections.generalAbility = RunService.Heartbeat:Connect(function(dt)
-    generalAbilityAccum = generalAbilityAccum + dt
-    if generalAbilityAccum >= 1 then
-        generalAbilityAccum = 0
-        if isGloveFiveMore(player) then
-            pcall(function()
-                ReplicatedStorage.GeneralAbility:FireServer()
-            end)
-        end
-    end
-end)
 
 -- UI 建構
 local screenGui = Instance.new("ScreenGui")
@@ -405,7 +365,7 @@ end
 -- 頁面1:攻擊者
 local autoAttackFrame, autoAttackStatus, autoAttackButton = createControlRow(page1, "自動攻擊:", "", "", false, 1)
 
--- 攻擊間隔
+-- 攻擊間隔(顯示"已設定",不可編輯)
 local attackIntervalFrame = Instance.new("Frame")
 attackIntervalFrame.Size = UDim2.new(1, 0, 0, 32)
 attackIntervalFrame.BackgroundColor3 = Color3.fromRGB(248, 249, 250)
@@ -453,7 +413,7 @@ attackIntervalUnit.Parent = attackIntervalFrame
 local attackDistanceFrame = Instance.new("Frame")
 attackDistanceFrame.Size = UDim2.new(1, 0, 0, 32)
 attackDistanceFrame.BackgroundColor3 = Color3.fromRGB(248, 249, 250)
-attackDistanceFrame.LayoutOrder = 3
+attackDistanceFrame.LayoutOrder = 2.5
 attackDistanceFrame.Parent = page1
 Instance.new("UICorner", attackDistanceFrame).CornerRadius = UDim.new(0, 6)
 
@@ -493,40 +453,9 @@ attackDistanceUnit.TextColor3 = Color3.fromRGB(100, 100, 100)
 attackDistanceUnit.TextXAlignment = Enum.TextXAlignment.Left
 attackDistanceUnit.Parent = attackDistanceFrame
 
-local jumpPowerFrame, jumpPowerInput, jumpPowerButton = createControlRow(page1, "跳躍力:", "50", "50", true, 4)
+local jumpPowerFrame, jumpPowerInput, jumpPowerButton = createControlRow(page1, "跳躍力:", "50", "50", true, 3)
 
 -- 頁面2:幫助者
-
--- GeneralAbility 狀態顯示列 (唯讀,不含啟動按鈕)
-local generalAbilityInfoFrame = Instance.new("Frame")
-generalAbilityInfoFrame.Size = UDim2.new(1, 0, 0, 32)
-generalAbilityInfoFrame.BackgroundColor3 = Color3.fromRGB(248, 249, 250)
-generalAbilityInfoFrame.LayoutOrder = 0
-generalAbilityInfoFrame.Parent = page2
-Instance.new("UICorner", generalAbilityInfoFrame).CornerRadius = UDim.new(0, 6)
-
-local generalAbilityLabel = Instance.new("TextLabel")
-generalAbilityLabel.Size = UDim2.new(0, 110, 1, 0)
-generalAbilityLabel.Position = UDim2.new(0, 6, 0, 0)
-generalAbilityLabel.BackgroundTransparency = 1
-generalAbilityLabel.Text = "通用技能 (自動):"
-generalAbilityLabel.TextSize = 11
-generalAbilityLabel.Font = Enum.Font.GothamBold
-generalAbilityLabel.TextColor3 = Color3.fromRGB(85, 85, 85)
-generalAbilityLabel.TextXAlignment = Enum.TextXAlignment.Left
-generalAbilityLabel.Parent = generalAbilityInfoFrame
-
-local generalAbilityStatus = Instance.new("TextLabel")
-generalAbilityStatus.Size = UDim2.new(0, 120, 0, 22)
-generalAbilityStatus.Position = UDim2.new(0, 116, 0, 5)
-generalAbilityStatus.BackgroundTransparency = 1
-generalAbilityStatus.Text = "偵測 Glove 中…"
-generalAbilityStatus.TextSize = 11
-generalAbilityStatus.Font = Enum.Font.Gotham
-generalAbilityStatus.TextColor3 = Color3.fromRGB(120, 120, 120)
-generalAbilityStatus.TextXAlignment = Enum.TextXAlignment.Left
-generalAbilityStatus.Parent = generalAbilityInfoFrame
-
 local helpTargetFrame = Instance.new("Frame")
 helpTargetFrame.Size = UDim2.new(1, 0, 0, 68)
 helpTargetFrame.BackgroundColor3 = Color3.fromRGB(248, 249, 250)
@@ -582,7 +511,7 @@ helpTargetInfo.TextXAlignment = Enum.TextXAlignment.Left
 helpTargetInfo.TextWrapped = true
 helpTargetInfo.Parent = helpTargetFrame
 
--- 設定距離
+-- 設定距離(純數值設定)
 local helpDistanceFrame = Instance.new("Frame")
 helpDistanceFrame.Size = UDim2.new(1, 0, 0, 32)
 helpDistanceFrame.BackgroundColor3 = Color3.fromRGB(248, 249, 250)
@@ -675,23 +604,7 @@ local function toggleUIState(btn, frame, input, isActive)
     updateStatus()
 end
 
--- 每秒更新 GeneralAbility 狀態顯示
-local generalAbilityDisplayAccum = 0
-RunService.Heartbeat:Connect(function(dt)
-    generalAbilityDisplayAccum = generalAbilityDisplayAccum + dt
-    if generalAbilityDisplayAccum >= 1 then
-        generalAbilityDisplayAccum = 0
-        if isGloveFiveMore(player) then
-            generalAbilityStatus.Text = "5 More ✅ 釋放中"
-            generalAbilityStatus.TextColor3 = Color3.fromRGB(46, 125, 50)
-        else
-            generalAbilityStatus.Text = "非 5 More，待機"
-            generalAbilityStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
-        end
-    end
-end)
-
--- 自動攻擊 (v1.8: 偵測目標 Glove，若為 5 More 則改打 _More["1"]~["5"])
+-- 自動攻擊 (完整版: 邊跳邊打模式 - 使用真實跳躍)
 autoAttackButton.MouseButton1Click:Connect(function()
     toggles.autoAttack = not toggles.autoAttack
     
@@ -718,19 +631,24 @@ autoAttackButton.MouseButton1Click:Connect(function()
                         
                         if hum and hrp then
                             local currentState = hum:GetState()
+                            
+                            -- 計算與目標的距離
                             local distance = (hrp.Position - torso.Position).Magnitude
                             
+                            -- 檢測跳躍狀態
                             if currentState == Enum.HumanoidStateType.Jumping 
                                or currentState == Enum.HumanoidStateType.Freefall then
                                 isJumping = true
                             end
                             
+                            -- 落地後重置狀態
                             if currentState == Enum.HumanoidStateType.Landed 
                                or currentState == Enum.HumanoidStateType.Running 
                                or currentState == Enum.HumanoidStateType.RunningNoPhysics then
                                 isJumping = false
                             end
                             
+                            -- 跳躍邏輯: 在地面且冷卻完成
                             if not isJumping 
                                and isOnGround() 
                                and (now - lastJumpTime) >= jumpCooldown then
@@ -738,20 +656,12 @@ autoAttackButton.MouseButton1Click:Connect(function()
                                 lastJumpTime = now
                             end
                             
+                            -- 攻擊邏輯: 按攻擊間隔持續攻擊
                             if distance <= values.attackDistance 
                                and (now - lastAttackTime) >= values.attackInterval then
-
-                                -- ★ 判斷目標 Glove 是否為 "5 More"
-                                if isGloveFiveMore(target) then
-                                    -- 對 目標_More["1"]~["5"] 各打一次
-                                    fireSpringHitMore(target)
-                                else
-                                    -- 普通攻擊
-                                    pcall(function()
-                                        ReplicatedStorage.springhit:FireServer(torso)
-                                    end)
-                                end
-
+                                pcall(function()
+                                    ReplicatedStorage.springhit:FireServer(torso)
+                                end)
                                 lastAttackTime = now
                             end
                         end
@@ -778,16 +688,6 @@ attackIntervalInput.FocusLost:Connect(function()
         values.attackInterval = val
     else
         attackIntervalInput.Text = tostring(values.attackInterval)
-    end
-end)
-
--- 攻擊距離
-attackDistanceInput.FocusLost:Connect(function()
-    local val = tonumber(attackDistanceInput.Text)
-    if val and val > 0 then
-        values.attackDistance = val
-    else
-        attackDistanceInput.Text = tostring(values.attackDistance)
     end
 end)
 
@@ -842,6 +742,16 @@ jumpPowerButton.MouseButton1Click:Connect(function()
     toggleUIState(jumpPowerButton, jumpPowerFrame, jumpPowerInput, toggles.jumpPower)
 end)
 
+-- 攻擊距離
+attackDistanceInput.FocusLost:Connect(function()
+    local val = tonumber(attackDistanceInput.Text)
+    if val and val > 0 then
+        values.attackDistance = val
+    else
+        attackDistanceInput.Text = tostring(values.attackDistance)
+    end
+end)
+
 -- 幫助目標
 helpTargetButton.MouseButton1Click:Connect(function()
     toggles.helpTarget = not toggles.helpTarget
@@ -860,18 +770,24 @@ helpTargetButton.MouseButton1Click:Connect(function()
         helpTargetInfo.Text = "目標: " .. targetPlayer.Name
         helpTargetInfo.TextColor3 = Color3.fromRGB(46, 125, 50)
         
+        -- 先傳送到 Lobby
         teleportToLobby()
+        
+        -- 等待1秒後傳送到目標位置
         task.wait(1)
         
+        -- 獲取目標位置並傳送
         local targetCFrame = getPositionInFrontOfPlayer(values.targetPlayer, values.helpDistance)
         if targetCFrame then
             local myChar = player.Character
             if myChar and myChar:FindFirstChild("HumanoidRootPart") then
                 myChar.HumanoidRootPart.CFrame = targetCFrame
                 
+                -- 如果開啟固定模式,記錄當前位置
                 if toggles.fixedPosition then
                     values.fixedCFrame = targetCFrame
                     
+                    -- 建立固定位置的連接
                     connections.helpTarget = RunService.Heartbeat:Connect(function()
                         if not toggles.helpTarget then return end
                         
@@ -881,6 +797,7 @@ helpTargetButton.MouseButton1Click:Connect(function()
                         end
                     end)
                 else
+                    -- 非固定模式,跟隨目標移動
                     connections.helpTarget = RunService.Heartbeat:Connect(function()
                         if not toggles.helpTarget or not values.targetPlayer then return end
                         
@@ -928,17 +845,21 @@ fixedPositionButton.MouseButton1Click:Connect(function()
         fixedPositionStatus.Text = "啟用"
         fixedPositionStatus.TextColor3 = Color3.fromRGB(46, 125, 50)
         
+        -- 如果幫助目標正在運行,切換到固定模式
         if toggles.helpTarget and values.targetPlayer then
+            -- 斷開舊連接
             if connections.helpTarget then
                 connections.helpTarget:Disconnect()
             end
             
+            -- 獲取當前位置或目標位置
             local myChar = player.Character
             if myChar and myChar:FindFirstChild("HumanoidRootPart") then
                 if not values.fixedCFrame then
                     values.fixedCFrame = myChar.HumanoidRootPart.CFrame
                 end
                 
+                -- 建立固定位置連接
                 connections.helpTarget = RunService.Heartbeat:Connect(function()
                     if not toggles.helpTarget then return end
                     
@@ -954,11 +875,14 @@ fixedPositionButton.MouseButton1Click:Connect(function()
         fixedPositionStatus.TextColor3 = Color3.fromRGB(150, 150, 150)
         values.fixedCFrame = nil
         
+        -- 如果幫助目標正在運行,切換到跟隨模式
         if toggles.helpTarget and values.targetPlayer then
+            -- 斷開舊連接
             if connections.helpTarget then
                 connections.helpTarget:Disconnect()
             end
             
+            -- 建立跟隨連接
             connections.helpTarget = RunService.Heartbeat:Connect(function()
                 if not toggles.helpTarget or not values.targetPlayer then return end
                 
@@ -981,7 +905,7 @@ fixedPositionStatus.Text = "啟用"
 fixedPositionStatus.TextColor3 = Color3.fromRGB(46, 125, 50)
 toggleUIState(fixedPositionButton, fixedPositionFrame, fixedPositionStatus, true)
 
--- 死後回場
+-- 死後回場 (改進版本)
 respawnTeleportButton.MouseButton1Click:Connect(function()
     toggles.respawnTeleport = not toggles.respawnTeleport
     
@@ -989,6 +913,7 @@ respawnTeleportButton.MouseButton1Click:Connect(function()
         respawnTeleportStatus.Text = "監控中"
         respawnTeleportStatus.TextColor3 = Color3.fromRGB(46, 125, 50)
         
+        -- 監控死亡的函數
         local function startDeathMonitor()
             local deathConnection
             deathConnection = RunService.Heartbeat:Connect(function()
@@ -1001,32 +926,46 @@ respawnTeleportButton.MouseButton1Click:Connect(function()
                 if char and char:FindFirstChild("Humanoid") then
                     local hum = char.Humanoid
                     if hum.Health <= 0 then
+                        -- 角色死亡,暫停監控避免重複觸發
                         deathConnection:Disconnect()
                         
+                        -- 啟動死後回場流程
                         task.spawn(function()
+                            -- 等待4秒
                             task.wait(4)
                             
                             if not toggles.respawnTeleport then return end
                             
+                            -- 確保角色已重生
                             local newChar = player.Character
                             if newChar and newChar:FindFirstChild("HumanoidRootPart") then
+                                -- 步驟1: 傳送到 Teleport1
                                 teleportToLobby()
+                                print("已傳送到Teleport1")
+                                
+                                -- 等待0.1秒
                                 task.wait(0.1)
                                 
                                 if not toggles.respawnTeleport then return end
                                 
+                                -- 步驟2: 如果幫助目標還在運行,傳送到對應位置
                                 if toggles.helpTarget and values.targetPlayer then
                                     if toggles.fixedPosition and values.fixedCFrame then
+                                        -- 固定模式: 傳送到固定位置
                                         newChar.HumanoidRootPart.CFrame = values.fixedCFrame
+                                        print("已傳送到固定位置")
                                     else
+                                        -- 跟隨模式: 傳送到目標當前位置
                                         local targetCFrame = getPositionInFrontOfPlayer(values.targetPlayer, values.helpDistance)
                                         if targetCFrame and newChar:FindFirstChild("HumanoidRootPart") then
                                             newChar.HumanoidRootPart.CFrame = targetCFrame
+                                            print("已傳送到幫助目標位置")
                                         end
                                     end
                                 end
                             end
                             
+                            -- 重新啟動監控
                             if toggles.respawnTeleport then
                                 task.wait(0.5)
                                 startDeathMonitor()
@@ -1039,6 +978,7 @@ respawnTeleportButton.MouseButton1Click:Connect(function()
             connections.respawnTeleport = deathConnection
         end
         
+        -- 啟動監控
         startDeathMonitor()
     else
         respawnTeleportStatus.Text = "關閉"
@@ -1142,6 +1082,7 @@ closeButton.MouseButton1Click:Connect(function()
         if conn then conn:Disconnect() end
     end
     
+    -- 還原跳躍力
     if toggles.jumpPower then
         local char = player.Character
         if char then
@@ -1162,14 +1103,20 @@ end)
 -- 角色重生處理
 player.CharacterAdded:Connect(function(newChar)
     task.wait(0.5)
+    
     if toggles.jumpPower then
         getOriginalJumpPower()
     end
 end)
 
-print("貓玲的彈簧精通腳本 v1.8 已載入!")
-print("v1.8 新增:")
-print("1. [幫助者] 自動偵測自身 Glove：若為 '5 More' 則每秒 GeneralAbility:FireServer()")
-print("2. [攻擊者] 偵測最近目標 Glove：若為 '5 More' 則改打 目標_More[1~5] 的 Torso")
-print("   └ 對 ['1']~['5'] 各自 springhit:FireServer(torso) 一次")
-print("   └ 若 Workspace 找不到 _More 資料夾則 fallback 打本體 Torso")
+print("貓玲的彈簧精通腳本 v1.7 已載入!")
+print("主要改進:")
+print("1. 自動攻擊: 邊跳邊打模式 - 使用 hum.Jump = true 真實跳躍 + 按間隔持續攻擊")
+print("2. 攻擊距離: 可自訂攻擊距離,預設15單位")
+print("3. 攻擊間隔: 可自訂,預設0.8秒")
+print("4. 死後回場: 等死亡4秒 → Teleport1 → 0.1秒 → 幫助目標位置")
+print("5. 幫助者現在會面向與目標相同的方向")
+print("6. 傳送後固定: 預設開啟,傳送到目標位置後會固定,不隨目標移動")
+print("7. 死後回場支持固定模式: 重生後會回到固定位置")
+print("")
+print("✅ 已修復: 使用真實跳躍方式,攻擊現在會正確計算任務進度!")
