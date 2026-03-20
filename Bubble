@@ -1,4 +1,4 @@
--- 貓玲的泡泡精通腳本 v0.1
+-- 貓玲的泡泡精通腳本 v0.3
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -445,35 +445,7 @@ local helpModeFrame, helpModeButton = createWideButtonRow(
 
 local fixedPosHelpFrame, fixedPosHelpStatus, fixedPosHelpButton = createRow(page2, "傳送後固定:", "啟用", "解除", 4)
 
--- 泡泡命中計數顯示
-local bubbleCountFrame = Instance.new("Frame")
-bubbleCountFrame.Size = UDim2.new(1, 0, 0, 32)
-bubbleCountFrame.BackgroundColor3 = THEME.bgRow
-bubbleCountFrame.LayoutOrder = 5
-bubbleCountFrame.Parent = page2
-Instance.new("UICorner", bubbleCountFrame).CornerRadius = UDim.new(0, 6)
 
-local bubbleCountLabel = Instance.new("TextLabel")
-bubbleCountLabel.Size = UDim2.new(0, 110, 1, 0)
-bubbleCountLabel.Position = UDim2.new(0, 6, 0, 0)
-bubbleCountLabel.BackgroundTransparency = 1
-bubbleCountLabel.Text = "泡泡命中數:"
-bubbleCountLabel.TextSize = 12
-bubbleCountLabel.Font = Enum.Font.GothamBold
-bubbleCountLabel.TextColor3 = THEME.textSub
-bubbleCountLabel.TextXAlignment = Enum.TextXAlignment.Left
-bubbleCountLabel.Parent = bubbleCountFrame
-
-local bubbleCountValue = Instance.new("TextLabel")
-bubbleCountValue.Size = UDim2.new(0, 120, 0, 22)
-bubbleCountValue.Position = UDim2.new(0, 116, 0, 5)
-bubbleCountValue.BackgroundTransparency = 1
-bubbleCountValue.Text = "0 / 250"
-bubbleCountValue.TextSize = 12
-bubbleCountValue.Font = Enum.Font.Gotham
-bubbleCountValue.TextColor3 = THEME.accent
-bubbleCountValue.TextXAlignment = Enum.TextXAlignment.Left
-bubbleCountValue.Parent = bubbleCountFrame
 
 -- ============================================================
 -- 狀態標籤
@@ -709,64 +681,78 @@ fixedPosHelpButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 泡泡命中計數更新
+-- 泡泡命中計數更新（無 UI，僅保留計數邏輯）
 -- ============================================================
 local function updateBubbleCountUI()
-    bubbleCountValue.Text = tostring(values.bubbleHitCount) .. " / " .. tostring(values.bubbleHitLimit)
-    if values.bubbleHitCount >= values.bubbleHitLimit * 0.8 then
-        bubbleCountValue.TextColor3 = Color3.fromRGB(255, 140, 60)
-    else
-        bubbleCountValue.TextColor3 = THEME.accent
-    end
 end
 
 -- ============================================================
 -- BubbleObject 偵測（被打後不重置模式專用）
--- 當 200 單位內有 BubbleObject 時觸發 TouchInterest 並計數
--- 到達 250 次時重置
--- onReset: 計數達上限時回呼（外部處理重置流程）
+-- 邏輯：
+--   掃描場上所有名為 BubbleObject 的物件（可能同時多個）
+--   對每個尚未處理的實例：
+--     1. 在 200 單位內 → 觸發 TouchInterest，標記該實例為「碰到中」
+--     2. 等待同一個實例從 Workspace 消失（Parent == nil）
+--     3. 消失後才 +1，並檢查是否達上限
+--   同一實例不重複觸發，消失前不計數
+-- onReset: 計數達上限時回呼
 -- ============================================================
 local function startBubbleDetector(hrp, onReset)
     local running = true
+    -- 記錄已在追蹤中的實例（用物件本身當 key）
+    local tracked = {}   -- [bubbleObj] = true（正在等消失）
+
     local thread = task.spawn(function()
         while running and toggles.helpTarget do
             if hrp and hrp.Parent then
                 local myPos = hrp.Position
-                pcall(function()
-                    local bubbleObj = Workspace:FindFirstChild("BubbleObject")
-                    if bubbleObj then
-                        local hitbox = bubbleObj:FindFirstChild("Hitbox")
-                        if hitbox then
+
+                -- 掃描場上所有 BubbleObject
+                for _, obj in ipairs(Workspace:GetChildren()) do
+                    if obj.Name == "BubbleObject" and not tracked[obj] then
+                        local hitbox = obj:FindFirstChild("Hitbox")
+                        if hitbox and hitbox.Parent then
                             local dist = (hitbox.Position - myPos).Magnitude
                             if dist <= 200 then
+                                -- 標記，避免重複處理同一實例
+                                tracked[obj] = true
+
                                 -- 觸發 TouchInterest
                                 pcall(function()
-                                    local ti = hitbox:FindFirstChildOfClass("TouchTransmitter")
-                                        or hitbox:FindFirstChild("TouchInterest")
-                                    if ti then
-                                        firetouchinterest(hrp, hitbox, 0)
+                                    firetouchinterest(hrp, hitbox, 0)
+                                end)
+
+                                -- 非同步等待這個實例消失，消失後才 +1
+                                local capturedObj = obj
+                                task.spawn(function()
+                                    -- 等待實例從場上移除
+                                    while capturedObj and capturedObj.Parent ~= nil do
+                                        task.wait(0.05)
+                                    end
+
+                                    -- 確認偵測器仍在執行才計數
+                                    if not running then return end
+
+                                    values.bubbleHitCount = values.bubbleHitCount + 1
+                                    updateBubbleCountUI()
+                                    tracked[capturedObj] = nil
+
+                                    if values.bubbleHitCount >= values.bubbleHitLimit then
+                                        running = false
+                                        values.bubbleHitCount = 0
+                                        updateBubbleCountUI()
+                                        onReset()
                                     end
                                 end)
-                                -- 計數
-                                values.bubbleHitCount = values.bubbleHitCount + 1
-                                updateBubbleCountUI()
-
-                                if values.bubbleHitCount >= values.bubbleHitLimit then
-                                    running = false
-                                    onReset()
-                                    return
-                                end
-                                -- 短暫等待避免同一個 BubbleObject 重複觸發
-                                task.wait(0.5)
                             end
                         end
                     end
-                end)
+                end
             end
             task.wait(0.1)
         end
     end)
-    -- 回傳停止函數
+
     return function()
         running = false
         pcall(function() task.cancel(thread) end)
@@ -1178,4 +1164,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的泡泡精通腳本 v0.1 已載入!")
+print("貓玲的泡泡精通腳本 v0.3 已載入!")
