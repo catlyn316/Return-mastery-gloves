@@ -1,4 +1,4 @@
--- 貓玲的泡泡精通腳本 v0.4
+-- 貓玲的泡泡精通腳本 v0.5
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -802,40 +802,42 @@ end
 
 -- ============================================================
 -- 幫助者位置迴圈：被打時重置
--- 監聽 LastSlappedBy.Changed，只要值變成目標名稱就立刻重置
+-- 監聽 folder.ChildAdded 等 LastSlappedBy 出現，出現後立即讀值判斷
 -- ============================================================
 local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
     local resetTriggered = false
-    local slappedByConn  = nil
+    local folderConn     = nil
 
-    local function setupSlappedByConn()
-        if slappedByConn then pcall(function() slappedByConn:Disconnect() end) end
+    local function setupFolderConn()
+        if folderConn then pcall(function() folderConn:Disconnect() end) end
         pcall(function()
             local folder = Workspace:FindFirstChild(player.Name)
-            local slappedByObj = folder and folder:FindFirstChild("LastSlappedBy")
-            if not slappedByObj then return end
-            slappedByConn = slappedByObj.Changed:Connect(function(newVal)
+            if not folder then return end
+            folderConn = folder.ChildAdded:Connect(function(child)
                 if resetTriggered then return end
-                if tostring(newVal) == tgt.Name then
-                    resetTriggered = true
-                    if slappedByConn then pcall(function() slappedByConn:Disconnect() end) end
-                    pcall(function() Players.LocalPlayer.Reset:FireServer() end)
-                    task.wait(0.1)
-                    onDone()
+                if child.Name == "LastSlappedBy" then
+                    local val = tostring(child.Value)
+                    if val == tgt.Name then
+                        resetTriggered = true
+                        if folderConn then pcall(function() folderConn:Disconnect() end) end
+                        pcall(function() Players.LocalPlayer.Reset:FireServer() end)
+                        task.wait(0.1)
+                        onDone()
+                    end
                 end
             end)
         end)
     end
 
-    setupSlappedByConn()
+    setupFolderConn()
 
     while toggles.helpTarget and not resetTriggered do
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        -- 若連線失效（例如 folder 剛出現）則重新綁定
-        if not slappedByConn then
-            setupSlappedByConn()
+        -- folder 可能還不存在，持續嘗試綁定
+        if not folderConn then
+            setupFolderConn()
         end
 
         pcall(function()
@@ -854,7 +856,7 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
         task.wait(0.05)
     end
 
-    if slappedByConn then pcall(function() slappedByConn:Disconnect() end) end
+    if folderConn then pcall(function() folderConn:Disconnect() end) end
     if not resetTriggered then onDone() end
 end
 
@@ -1148,4 +1150,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的泡泡精通腳本 v0.4 已載入!")
+print("貓玲的泡泡精通腳本 v0.5 已載入!")
