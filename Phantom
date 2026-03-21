@@ -1,4 +1,4 @@
--- 貓玲的幻影精通腳本 v0.2
+-- 貓玲的幻影精通腳本 v0.1
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -17,69 +17,47 @@ pcall(function()
     end
 end)
 
--- ============================================================
--- 常數
--- ============================================================
-local ABILITY_DURATION = 2.5   -- 能力持續秒數
-local ABILITY_COOLDOWN = 6.0   -- 能力冷卻秒數（持續結束後才算）
-
--- ============================================================
--- 變數
--- ============================================================
 local toggles = {
-    quest1       = false,
-    quest2       = false,
-    quest3       = false,
-    helpTarget   = false,
-    fixedPosHelp = true,
+    attacker      = false,
+    fixedPosition = false,
+    helpTarget    = false,
+    fixedPosHelp  = false,
 }
 
 local values = {
-    attackInterval = 0.6,
-    helpDistance   = 15,
+    attackInterval = 0.15,
+    helpDistance   = 3,
     helpMode       = "被打後不重置",
     targetPlayer   = nil,
     fixedCFrame    = nil,
-    quest3Count    = 0,
 }
 
 local connections = {
-    quest1     = nil,
-    quest2     = nil,
-    quest3     = nil,
+    attacker   = nil,
     helpTarget = nil,
 }
-
--- 共用能力冷卻狀態（Quest1/Quest2 共享）
-local abilityReady = true
 
 local isPosLockEnabled = false
 local posLockLoop      = nil
 local savedPosition    = nil
 
--- 幻影主題色（深紫 / 幽靈白）
 local THEME = {
-    primary     = Color3.fromRGB(130,  70, 210),
-    primaryDark = Color3.fromRGB( 75,  35, 130),
-    accent      = Color3.fromRGB(210, 180, 255),
+    primary     = Color3.fromRGB(120,  60, 200),
+    primaryDark = Color3.fromRGB( 70,  20, 130),
+    accent      = Color3.fromRGB(210, 170, 255),
     bg          = Color3.fromRGB( 12,   8,  22),
-    bgPanel     = Color3.fromRGB( 18,  12,  32),
-    bgRow       = Color3.fromRGB( 26,  16,  46),
-    bgInput     = Color3.fromRGB( 36,  22,  62),
-    titleBg     = Color3.fromRGB( 14,   9,  28),
-    tabBg       = Color3.fromRGB( 32,  20,  55),
-    tabActive   = Color3.fromRGB( 75,  40, 130),
-    textMain    = Color3.fromRGB(225, 210, 255),
-    textSub     = Color3.fromRGB(170, 140, 230),
-    textMuted   = Color3.fromRGB(100,  80, 155),
+    bgRow       = Color3.fromRGB( 26,  16,  44),
+    bgInput     = Color3.fromRGB( 38,  22,  65),
+    titleBg     = Color3.fromRGB( 14,   8,  28),
+    tabBg       = Color3.fromRGB( 30,  18,  55),
+    tabActive   = Color3.fromRGB( 75,  35, 140),
+    textMain    = Color3.fromRGB(230, 210, 255),
+    textSub     = Color3.fromRGB(175, 140, 240),
+    textMuted   = Color3.fromRGB(100,  70, 160),
     red         = Color3.fromRGB(200,  45,  45),
-    green       = Color3.fromRGB( 55, 180,  80),
     statusBg    = Color3.fromRGB( 10,   6,  20),
 }
 
--- ============================================================
--- 輔助函數
--- ============================================================
 local function findPlayerByPartialName(input)
     if not input or input == "" then return nil, "請輸入玩家名稱" end
     input = input:lower()
@@ -96,7 +74,7 @@ local function findPlayerByPartialName(input)
     else
         local names = {}
         for _, p in ipairs(matches) do table.insert(names, p.Name) end
-        return nil, "找到多個玩家: " .. table.concat(names, ", ") .. "\n請輸入更多字元"
+        return nil, "找到多個: " .. table.concat(names, ", ")
     end
 end
 
@@ -114,38 +92,7 @@ local function getNearestTarget()
     return nearest
 end
 
-local function getTorso(p)
-    return p and p.Character and p.Character:FindFirstChild("Torso")
-end
-
-local function fireHit(torso)
-    if not torso then return end
-    pcall(function() ReplicatedStorage.PhantomHit:FireServer(torso) end)
-end
-
--- 發動能力，回傳是否成功
-local function useAbility()
-    if not abilityReady then return false end
-    local char = player.Character
-    local phantom = char and char:FindFirstChild("Phantom")
-    if not phantom then return false end
-    abilityReady = false
-    pcall(function() ReplicatedStorage.PhantomDash:InvokeServer(phantom) end)
-    -- 持續時間結束後才開始冷卻，冷卻結束後設 ready
-    task.spawn(function()
-        task.wait(ABILITY_DURATION + ABILITY_COOLDOWN)
-        abilityReady = true
-    end)
-    return true
-end
-
-local function waitAbilityReady()
-    while not abilityReady do task.wait(0.1) end
-end
-
--- ============================================================
--- UI 建構
--- ============================================================
+-- UI
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "PhantomMasterUI"
 screenGui.ResetOnSpawn = false
@@ -162,17 +109,17 @@ end
 parentUI(screenGui)
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 290, 0, 340)
-mainFrame.Position = UDim2.new(0.5, -145, 0.5, -170)
+mainFrame.Size = UDim2.new(0, 280, 0, 310)
+mainFrame.Position = UDim2.new(0.5, -140, 0.5, -155)
 mainFrame.BackgroundColor3 = THEME.bg
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
 
-local mainStroke = Instance.new("UIStroke")
-mainStroke.Color = THEME.primaryDark
-mainStroke.Thickness = 1.5
-mainStroke.Parent = mainFrame
+local stroke = Instance.new("UIStroke")
+stroke.Color = THEME.primaryDark
+stroke.Thickness = 1.5
+stroke.Parent = mainFrame
 
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 32)
@@ -180,16 +127,15 @@ titleBar.BackgroundColor3 = THEME.titleBg
 titleBar.Parent = mainFrame
 Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
 
-local titleLabel = Instance.new("TextLabel")
-titleLabel.Size = UDim2.new(1, -60, 1, 0)
-titleLabel.Position = UDim2.new(0, 10, 0, 0)
-titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "貓玲的幻影精通腳本"
-titleLabel.TextSize = 14
-titleLabel.Font = Enum.Font.GothamBold
-titleLabel.TextColor3 = THEME.accent
-titleLabel.TextXAlignment = Enum.TextXAlignment.Left
-titleLabel.Parent = titleBar
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -60, 1, 0)
+title.BackgroundTransparency = 1
+title.Text = "貓玲的幻影精通腳本"
+title.TextSize = 14
+title.Font = Enum.Font.GothamBold
+title.TextColor3 = THEME.accent
+title.TextXAlignment = Enum.TextXAlignment.Center
+title.Parent = titleBar
 
 local minimizeButton = Instance.new("TextButton")
 minimizeButton.Size = UDim2.new(0, 24, 0, 24)
@@ -197,7 +143,6 @@ minimizeButton.Position = UDim2.new(1, -54, 0, 4)
 minimizeButton.BackgroundColor3 = THEME.tabActive
 minimizeButton.Text = "─"
 minimizeButton.TextColor3 = THEME.textMain
-minimizeButton.Font = Enum.Font.GothamBold
 minimizeButton.Parent = titleBar
 Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 5)
 
@@ -207,7 +152,6 @@ closeButton.Position = UDim2.new(1, -28, 0, 4)
 closeButton.BackgroundColor3 = THEME.red
 closeButton.Text = "X"
 closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-closeButton.Font = Enum.Font.GothamBold
 closeButton.Parent = titleBar
 Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 5)
 
@@ -236,11 +180,11 @@ local tab1 = createTab("攻擊者", 1)
 local tab2 = createTab("幫助者", 2)
 
 local contentContainer = Instance.new("Frame")
-contentContainer.Size = UDim2.new(0.9, 0, 0, 238)
+contentContainer.Size = UDim2.new(0.9, 0, 0, 210)
 contentContainer.Position = UDim2.new(0.05, 0, 0, 72)
 contentContainer.BackgroundTransparency = 1
-contentContainer.ClipsDescendants = true
 contentContainer.Parent = mainFrame
+contentContainer.ClipsDescendants = true
 
 local function createScrollingPage(parent)
     local page = Instance.new("ScrollingFrame")
@@ -257,9 +201,9 @@ local function createScrollingPage(parent)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
     layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     layout.Parent = page
-    local pad = Instance.new("UIPadding")
-    pad.PaddingRight = UDim.new(0, 6)
-    pad.Parent = page
+    local padding = Instance.new("UIPadding")
+    padding.PaddingRight = UDim.new(0, 6)
+    padding.Parent = page
     return page
 end
 
@@ -270,18 +214,17 @@ page1.Visible = true
 local function switchTab(n)
     page1.Visible = (n == 1)
     page2.Visible = (n == 2)
-    tab1.BackgroundColor3 = (n==1) and THEME.tabActive or THEME.tabBg
-    tab1.TextColor3      = (n==1) and THEME.textMain  or THEME.textMuted
-    tab2.BackgroundColor3 = (n==2) and THEME.tabActive or THEME.tabBg
-    tab2.TextColor3      = (n==2) and THEME.textMain  or THEME.textMuted
+    local tabs = {tab1, tab2}
+    for i, t in ipairs(tabs) do
+        t.BackgroundColor3 = (i == n) and THEME.tabActive or THEME.tabBg
+        t.TextColor3 = (i == n) and THEME.textMain or THEME.textMuted
+    end
 end
+
 tab1.MouseButton1Click:Connect(function() switchTab(1) end)
 tab2.MouseButton1Click:Connect(function() switchTab(2) end)
 switchTab(1)
 
--- ============================================================
--- 共用 UI 元件建構函數
--- ============================================================
 local function createRow(parent, labelText, statusText, btnText, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, 32)
@@ -346,7 +289,7 @@ local function createWideButtonRow(parent, labelText, btnText, btnColor, order)
     label.Parent = frame
 
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 165, 0, 22)
+    btn.Size = UDim2.new(0, 160, 0, 22)
     btn.Position = UDim2.new(0, 82, 0, 5)
     btn.BackgroundColor3 = btnColor or THEME.primary
     btn.Text = btnText
@@ -408,17 +351,11 @@ end
 -- ============================================================
 -- 頁面1：攻擊者
 -- ============================================================
-local attackIntervalFrame, attackIntervalInput = createInputRow(page1, "攻擊間隔:", "0.6", "秒", 1)
-local q1Frame, q1Status, q1Btn = createRow(page1, "Quest1 現身攻:", "關閉", "啟動", 2)
-local q2Frame, q2Status, q2Btn = createRow(page1, "Quest2 隱身攻:", "關閉", "啟動", 3)
-local q3Frame, q3Status, q3Btn = createRow(page1, "Quest3 碰撞攻:", "關閉", "啟動", 4)
-local fixedPosFrame, fixedPosStatus, fixedPosButton = createRow(page1, "固定位置:", "關閉", "啟動", 5)
-
-attackIntervalInput.FocusLost:Connect(function()
-    local v = tonumber(attackIntervalInput.Text)
-    if v and v > 0 then values.attackInterval = v
-    else attackIntervalInput.Text = tostring(values.attackInterval) end
-end)
+local attackerFrame, attackerStatus, attackerButton          = createRow(page1, "自動攻擊:", "關閉", "啟動", 1)
+local phaseFrame, phaseStatus, _noBtn                        = createRow(page1, "當前狀態:", "待機", "─", 2)
+_noBtn.Visible = false
+local attackIntervalFrame, attackIntervalInput               = createInputRow(page1, "連擊間隔:", "0.15", "秒", 3)
+local fixedPosFrame, fixedPosStatus, fixedPosButton          = createRow(page1, "固定位置:", "關閉", "啟動", 4)
 
 -- ============================================================
 -- 頁面2：幫助者
@@ -478,17 +415,16 @@ helpTargetInfo.TextXAlignment = Enum.TextXAlignment.Left
 helpTargetInfo.TextWrapped = true
 helpTargetInfo.Parent = helpTargetFrame
 
-local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離:", "15", "格", 2)
+local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離:", "3", "格", 2)
 
 local helpModeFrame, helpModeButton = createWideButtonRow(
-    page2, "幫助模式:", "被打後不重置", Color3.fromRGB(50, 100, 160), 3
+    page2, "幫助模式:", "被打後不重置",
+    Color3.fromRGB(30, 100, 160), 3
 )
 
-local fixedPosHelpFrame, fixedPosHelpStatus, fixedPosHelpButton = createRow(page2, "傳送後固定:", "啟用", "解除", 4)
+local fixedPosHelpFrame, fixedPosHelpStatus, fixedPosHelpButton = createRow(page2, "傳送後固定:", "關閉", "啟動", 4)
 
--- ============================================================
--- 狀態標籤
--- ============================================================
+-- 狀態列
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(0.9, 0, 0, 26)
 statusLabel.Position = UDim2.new(0.05, 0, 1, -32)
@@ -502,11 +438,9 @@ Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
 
 local function updateStatus()
     local active = {}
-    if toggles.quest1 then table.insert(active, "Q1") end
-    if toggles.quest2 then table.insert(active, "Q2") end
-    if toggles.quest3 then table.insert(active, "Q3("..values.quest3Count.."/10)") end
+    if toggles.attacker then table.insert(active, "攻擊中") end
     if toggles.helpTarget then table.insert(active, "幫助中") end
-    if isPosLockEnabled then table.insert(active, "固定") end
+    if isPosLockEnabled then table.insert(active, "位置鎖定") end
     if #active > 0 then
         statusLabel.Text = "✅ " .. table.concat(active, " | ")
         statusLabel.TextColor3 = THEME.accent
@@ -516,22 +450,22 @@ local function updateStatus()
     end
 end
 
-local function setRowActive(btn, frame, isActive)
+local function toggleUIState(btn, frame, status, isActive, activeText, inactiveText)
     if isActive then
         btn.Text = "解除"
         btn.BackgroundColor3 = THEME.red
-        frame.BackgroundColor3 = Color3.fromRGB(22, 10, 42)
+        frame.BackgroundColor3 = Color3.fromRGB(20, 8, 40)
+        if status then status.Text = activeText or "運行中" status.TextColor3 = THEME.accent end
     else
         btn.Text = "啟動"
         btn.BackgroundColor3 = THEME.primary
         frame.BackgroundColor3 = THEME.bgRow
+        if status then status.Text = inactiveText or "關閉" status.TextColor3 = THEME.textMuted end
     end
     updateStatus()
 end
 
--- ============================================================
--- 固定位置（攻擊者頁）
--- ============================================================
+-- 固定位置（攻擊者）
 fixedPosButton.MouseButton1Click:Connect(function()
     isPosLockEnabled = not isPosLockEnabled
     if isPosLockEnabled then
@@ -548,7 +482,7 @@ fixedPosButton.MouseButton1Click:Connect(function()
             fixedPosStatus.TextColor3 = THEME.accent
             fixedPosButton.Text = "解除"
             fixedPosButton.BackgroundColor3 = THEME.red
-            fixedPosFrame.BackgroundColor3 = Color3.fromRGB(22, 10, 42)
+            fixedPosFrame.BackgroundColor3 = Color3.fromRGB(20, 8, 40)
         else
             isPosLockEnabled = false
         end
@@ -564,194 +498,133 @@ fixedPosButton.MouseButton1Click:Connect(function()
     updateStatus()
 end)
 
--- ============================================================
--- Quest 1：現身後 2 秒內攻擊（350 次）
--- 等能力冷卻 → 發動能力 → 等持續結束 → 現身後 2 秒攻擊 → 等冷卻 → 重複
--- ============================================================
-local function runQuest1()
-    while toggles.quest1 do
-        local char = player.Character
-        if not char or not char:FindFirstChild("HumanoidRootPart") then task.wait(0.2) continue end
-
-        if not getNearestTarget() then
-            q1Status.Text = "等目標" q1Status.TextColor3 = THEME.textMuted
-            task.wait(0.5) continue
-        end
-
-        if not abilityReady then
-            q1Status.Text = "等冷卻" q1Status.TextColor3 = THEME.textMuted
-            waitAbilityReady()
-            if not toggles.quest1 then break end
-        end
-
-        q1Status.Text = "能力中" q1Status.TextColor3 = THEME.accent
-        useAbility()
-        task.wait(ABILITY_DURATION)
-        if not toggles.quest1 then break end
-
-        q1Status.Text = "現身攻擊" q1Status.TextColor3 = THEME.green
-        local windowEnd = tick() + 2.0
-        while toggles.quest1 and tick() < windowEnd do
-            fireHit(getTorso(getNearestTarget()))
-            task.wait(values.attackInterval)
-        end
-    end
-    q1Status.Text = "關閉" q1Status.TextColor3 = THEME.textMuted
-end
+attackIntervalInput.FocusLost:Connect(function()
+    local val = tonumber(attackIntervalInput.Text)
+    if val and val > 0 then values.attackInterval = val
+    else attackIntervalInput.Text = tostring(values.attackInterval) end
+end)
 
 -- ============================================================
--- Quest 2：打人 → 隱身 → 趁隱身再打同一人（200 次）
--- 等能力冷卻 → 攻擊目標一次 → 立刻能力 → 隱身中持續攻擊同一目標 → 等冷卻 → 重複
+-- 攻擊者：面向鎖定目標（鎖定首個偵測到的目標，不切換）
 -- ============================================================
-local function runQuest2()
-    while toggles.quest2 do
-        local char = player.Character
-        if not char or not char:FindFirstChild("HumanoidRootPart") then task.wait(0.2) continue end
+local lockedTarget      = nil
+local faceTargetLoop    = nil
+local faceTargetRunning = false
 
-        local tgt = getNearestTarget()
-        if not tgt then
-            q2Status.Text = "等目標" q2Status.TextColor3 = THEME.textMuted
-            task.wait(0.5) continue
-        end
-
-        if not abilityReady then
-            q2Status.Text = "等冷卻" q2Status.TextColor3 = THEME.textMuted
-            waitAbilityReady()
-            if not toggles.quest2 then break end
-        end
-
-        -- 先打一次
-        q2Status.Text = "初次攻擊" q2Status.TextColor3 = THEME.accent
-        fireHit(getTorso(tgt))
-        task.wait(0.1)
-        if not toggles.quest2 then break end
-
-        -- 立刻發動能力（隱身）
-        q2Status.Text = "隱身攻擊" q2Status.TextColor3 = THEME.green
-        useAbility()
-
-        -- 隱身期間持續打同一目標
-        local abilityEnd = tick() + ABILITY_DURATION
-        while toggles.quest2 and tick() < abilityEnd do
-            fireHit(getTorso(tgt))
-            task.wait(values.attackInterval)
-        end
-        if not toggles.quest2 then break end
-
-        q2Status.Text = "等冷卻" q2Status.TextColor3 = THEME.textMuted
-        waitAbilityReady()
-    end
-    q2Status.Text = "關閉" q2Status.TextColor3 = THEME.textMuted
-end
-
--- ============================================================
--- Quest 3：碰撞後攻擊不死 10 次連續
--- 距離 <= 5 視為碰撞 → 立刻攻擊 計數+1
--- 死亡 → 計數歸零
--- 到 10 次 → 重置計數繼續
--- ============================================================
-local function runQuest3()
-    values.quest3Count = 0
-    local lastHitTime = 0
-    local HIT_COOLDOWN = 1.0
-    local deathConn = nil
-    local respawnConn = nil
-
-    local function setupDeathConn()
-        if deathConn then pcall(function() deathConn:Disconnect() end) deathConn = nil end
-        local char = player.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if not hum then return end
-        deathConn = hum.Died:Connect(function()
-            values.quest3Count = 0
-            q3Status.Text = "死亡歸零" q3Status.TextColor3 = THEME.red
-            updateStatus()
-        end)
-    end
-
-    setupDeathConn()
-    respawnConn = player.CharacterAdded:Connect(function()
-        task.wait(1)
-        if toggles.quest3 then setupDeathConn() end
-    end)
-
-    while toggles.quest3 do
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if not hrp or not hum or hum.Health <= 0 then task.wait(0.2) continue end
-
-        local tgt = getNearestTarget()
-        if not tgt then
-            q3Status.Text = "等目標" q3Status.TextColor3 = THEME.textMuted
-            task.wait(0.5) continue
-        end
-
-        local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-        if not tgtRoot then task.wait(0.1) continue end
-
-        if (tgtRoot.Position - hrp.Position).Magnitude <= 5 and (tick() - lastHitTime) >= HIT_COOLDOWN then
-            lastHitTime = tick()
-            fireHit(getTorso(tgt))
-            values.quest3Count = values.quest3Count + 1
-            updateStatus()
-            if values.quest3Count >= 10 then
-                q3Status.Text = "10次完成！" q3Status.TextColor3 = THEME.green
-                task.wait(1)
-                values.quest3Count = 0
-                updateStatus()
-            else
-                q3Status.Text = values.quest3Count.."/10" q3Status.TextColor3 = THEME.accent
+local function startFaceTargetLoop()
+    if faceTargetRunning then return end
+    faceTargetRunning = true
+    if not lockedTarget then lockedTarget = getNearestTarget() end
+    faceTargetLoop = task.spawn(function()
+        while faceTargetRunning do
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp and lockedTarget and lockedTarget.Character and lockedTarget.Character:FindFirstChild("HumanoidRootPart") then
+                local targetPos = lockedTarget.Character.HumanoidRootPart.Position
+                local lookCFrame = CFrame.new(hrp.Position, Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z))
+                pcall(function() hrp.CFrame = lookCFrame end)
             end
+            task.wait(0.05)
         end
+    end)
+end
 
-        task.wait(0.05)
+local function stopFaceTargetLoop()
+    if not toggles.attacker then
+        faceTargetRunning = false
+        if faceTargetLoop then task.cancel(faceTargetLoop) faceTargetLoop = nil end
+        lockedTarget = nil
     end
-
-    if deathConn then pcall(function() deathConn:Disconnect() end) end
-    if respawnConn then pcall(function() respawnConn:Disconnect() end) end
-    q3Status.Text = "關閉" q3Status.TextColor3 = THEME.textMuted
 end
 
 -- ============================================================
--- Quest 按鈕（可同時開啟，各自獨立 thread）
+-- 攻擊者主邏輯
+-- 流程：
+--   1. 鎖定最近目標
+--   2. 攻擊一次（PhantomHit）
+--   3. 立刻發動能力（PhantomDash）隱身 2.5 秒
+--   4. 2.5 秒內持續攻擊同一目標（每 attackInterval 秒）
+--   5. 等隱身結束後 6 秒冷卻
+--   6. 重複
 -- ============================================================
-q1Btn.MouseButton1Click:Connect(function()
-    toggles.quest1 = not toggles.quest1
-    if toggles.quest1 then
-        connections.quest1 = task.spawn(runQuest1)
-    else
-        if connections.quest1 then task.cancel(connections.quest1) connections.quest1 = nil end
-        q1Status.Text = "關閉" q1Status.TextColor3 = THEME.textMuted
-    end
-    setRowActive(q1Btn, q1Frame, toggles.quest1)
-end)
+local function runAttackerLoop()
+    while toggles.attacker do
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then task.wait(0.2) continue end
 
-q2Btn.MouseButton1Click:Connect(function()
-    toggles.quest2 = not toggles.quest2
-    if toggles.quest2 then
-        connections.quest2 = task.spawn(runQuest2)
-    else
-        if connections.quest2 then task.cancel(connections.quest2) connections.quest2 = nil end
-        q2Status.Text = "關閉" q2Status.TextColor3 = THEME.textMuted
-    end
-    setRowActive(q2Btn, q2Frame, toggles.quest2)
-end)
+        local target = getNearestTarget()
+        if not target or not target.Character then
+            phaseStatus.Text = "找目標中"
+            phaseStatus.TextColor3 = THEME.textMuted
+            task.wait(0.2)
+            continue
+        end
 
-q3Btn.MouseButton1Click:Connect(function()
-    toggles.quest3 = not toggles.quest3
-    if toggles.quest3 then
-        connections.quest3 = task.spawn(runQuest3)
-    else
-        if connections.quest3 then task.cancel(connections.quest3) connections.quest3 = nil end
-        q3Status.Text = "關閉" q3Status.TextColor3 = THEME.textMuted
-        values.quest3Count = 0
+        local targetName = target.Name
+
+        -- 步驟1：攻擊一次
+        phaseStatus.Text = "攻擊中"
+        phaseStatus.TextColor3 = THEME.accent
+        pcall(function()
+            local torso = target.Character and target.Character:FindFirstChild("Torso")
+            if torso then ReplicatedStorage.PhantomHit:FireServer(torso) end
+        end)
+        task.wait(0.1)
+        if not toggles.attacker then break end
+
+        -- 步驟2：立刻發動能力隱身
+        pcall(function()
+            local phantom = player.Character and player.Character:FindFirstChild("Phantom")
+            if phantom then
+                ReplicatedStorage.PhantomDash:InvokeServer(phantom)
+            end
+        end)
+
+        -- 步驟3：2.5 秒隱身期間持續攻擊
+        local dashEnd = tick() + 2.5
+        while tick() < dashEnd and toggles.attacker do
+            local remaining = math.floor((dashEnd - tick()) * 10) / 10
+            phaseStatus.Text = "隱身攻擊(" .. remaining .. "s)"
+            phaseStatus.TextColor3 = Color3.fromRGB(180, 100, 255)
+            pcall(function()
+                local tgt = Players:FindFirstChild(targetName)
+                local torso = tgt and tgt.Character and tgt.Character:FindFirstChild("Torso")
+                if torso then ReplicatedStorage.PhantomHit:FireServer(torso) end
+            end)
+            task.wait(values.attackInterval)
+        end
+        if not toggles.attacker then break end
+
+        -- 步驟4：6 秒冷卻
+        local cooldownEnd = tick() + 6.0
+        while tick() < cooldownEnd and toggles.attacker do
+            local remaining = math.ceil(cooldownEnd - tick())
+            phaseStatus.Text = "冷卻中(" .. remaining .. "s)"
+            phaseStatus.TextColor3 = THEME.textMuted
+            task.wait(0.2)
+        end
     end
-    setRowActive(q3Btn, q3Frame, toggles.quest3)
+    phaseStatus.Text = "待機"
+    phaseStatus.TextColor3 = THEME.textMuted
+end
+
+attackerButton.MouseButton1Click:Connect(function()
+    toggles.attacker = not toggles.attacker
+    if toggles.attacker then
+        lockedTarget = getNearestTarget()
+        startFaceTargetLoop()
+        connections.attacker = task.spawn(runAttackerLoop)
+    else
+        if connections.attacker then task.cancel(connections.attacker) connections.attacker = nil end
+        stopFaceTargetLoop()
+        phaseStatus.Text = "待機"
+        phaseStatus.TextColor3 = THEME.textMuted
+    end
+    toggleUIState(attackerButton, attackerFrame, attackerStatus, toggles.attacker, "運行中", "關閉")
 end)
 
 -- ============================================================
--- 幫助模式切換（預設被打時重置）
+-- 幫助模式切換（預設被打後不重置）
 -- ============================================================
 helpModeButton.MouseButton1Click:Connect(function()
     if values.helpMode == "被打後不重置" then
@@ -761,70 +634,34 @@ helpModeButton.MouseButton1Click:Connect(function()
     else
         values.helpMode = "被打後不重置"
         helpModeButton.Text = "被打後不重置"
-        helpModeButton.BackgroundColor3 = Color3.fromRGB(50, 100, 160)
+        helpModeButton.BackgroundColor3 = Color3.fromRGB(30, 100, 160)
     end
-    values.helpDistance = 15
-    helpDistanceInput.Text = "15"
 end)
 
--- ============================================================
--- 幫助者固定位置切換（預設開啟）
--- ============================================================
-toggles.fixedPosHelp = true
-fixedPosHelpStatus.Text = "啟用" fixedPosHelpStatus.TextColor3 = THEME.accent
-fixedPosHelpButton.Text = "解除" fixedPosHelpButton.BackgroundColor3 = THEME.red
-fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(22, 10, 42)
-
+-- 幫助者固定位置（預設關閉）
 fixedPosHelpButton.MouseButton1Click:Connect(function()
     toggles.fixedPosHelp = not toggles.fixedPosHelp
     if toggles.fixedPosHelp then
-        fixedPosHelpStatus.Text = "啟用" fixedPosHelpStatus.TextColor3 = THEME.accent
-        fixedPosHelpButton.Text = "解除" fixedPosHelpButton.BackgroundColor3 = THEME.red
-        fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(22, 10, 42)
+        fixedPosHelpStatus.Text = "啟用"
+        fixedPosHelpStatus.TextColor3 = THEME.accent
+        fixedPosHelpButton.Text = "解除"
+        fixedPosHelpButton.BackgroundColor3 = THEME.red
+        fixedPosHelpFrame.BackgroundColor3 = Color3.fromRGB(20, 8, 40)
     else
-        fixedPosHelpStatus.Text = "關閉" fixedPosHelpStatus.TextColor3 = THEME.textMuted
-        fixedPosHelpButton.Text = "啟動" fixedPosHelpButton.BackgroundColor3 = THEME.primary
+        fixedPosHelpStatus.Text = "關閉"
+        fixedPosHelpStatus.TextColor3 = THEME.textMuted
+        fixedPosHelpButton.Text = "啟動"
+        fixedPosHelpButton.BackgroundColor3 = THEME.primary
         fixedPosHelpFrame.BackgroundColor3 = THEME.bgRow
     end
 end)
 
-helpDistanceInput.FocusLost:Connect(function()
-    local val = tonumber(helpDistanceInput.Text)
-    if val and val > 0 then values.helpDistance = val
-    else helpDistanceInput.Text = tostring(values.helpDistance) end
-end)
-
 -- ============================================================
--- 幫助者位置迴圈：被打後不重置
+-- 幫助者：被打後不重置（持續圓形繞行貼身碰撞）
 -- ============================================================
 local function runHelpLoopNoReset(hrp, hum, tgt, onDone)
-    while toggles.helpTarget do
-        if not (hrp and hrp.Parent) then break end
-        if hum.Health <= 0 then break end
-        pcall(function()
-            if toggles.fixedPosHelp and values.fixedCFrame then
-                hrp.CFrame = values.fixedCFrame
-            elseif not toggles.fixedPosHelp then
-                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                if tgtRoot then
-                    local lookDir = tgtRoot.CFrame.LookVector
-                    local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
-                    hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
-                end
-            end
-        end)
-        task.wait()
-    end
-    onDone()
-end
-
--- ============================================================
--- 幫助者位置迴圈：被打時重置
--- 監聽 folder.ChildAdded，LastSlappedBy 出現且是目標時重置
--- ============================================================
-local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
     local resetTriggered = false
-    local folderConn = nil
+    local folderConn     = nil
 
     local function doReset()
         if resetTriggered then return end
@@ -855,18 +692,79 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
         if not folderConn then setupFolderConn() end
+
         pcall(function()
             if toggles.fixedPosHelp and values.fixedCFrame then
                 hrp.CFrame = values.fixedCFrame
-            elseif not toggles.fixedPosHelp then
+            else
                 local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                if tgtRoot then
-                    local lookDir = tgtRoot.CFrame.LookVector
-                    local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
-                    hrp.CFrame = CFrame.new(newPos, newPos + lookDir)
+                if tgtRoot and hrp and hrp.Parent then
+                    local angle = (tick() * 200) % 360
+                    local rad = math.rad(angle)
+                    local offset = Vector3.new(math.sin(rad), 0, math.cos(rad)) * values.helpDistance
+                    hrp.CFrame = CFrame.new(tgtRoot.Position + offset, tgtRoot.Position)
                 end
             end
         end)
+
+        task.wait(0.05)
+    end
+
+    if folderConn then pcall(function() folderConn:Disconnect() end) end
+    if not resetTriggered then onDone() end
+end
+
+-- ============================================================
+-- 幫助者：被打時重置
+-- ============================================================
+local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
+    local resetTriggered = false
+    local folderConn     = nil
+
+    local function doReset()
+        if resetTriggered then return end
+        resetTriggered = true
+        if folderConn then pcall(function() folderConn:Disconnect() end) end
+        pcall(function() Players.LocalPlayer.Reset:FireServer() end)
+        task.wait(0.1)
+        onDone()
+    end
+
+    local function setupFolderConn()
+        if folderConn then pcall(function() folderConn:Disconnect() end) end
+        pcall(function()
+            local folder = Workspace:FindFirstChild(player.Name)
+            if not folder then return end
+            folderConn = folder.ChildAdded:Connect(function(child)
+                if resetTriggered then return end
+                if child.Name == "LastSlappedBy" and tostring(child.Value) == tgt.Name then
+                    doReset()
+                end
+            end)
+        end)
+    end
+
+    setupFolderConn()
+
+    while toggles.helpTarget and not resetTriggered do
+        if not (hrp and hrp.Parent) then break end
+        if hum.Health <= 0 then break end
+        if not folderConn then setupFolderConn() end
+
+        pcall(function()
+            if toggles.fixedPosHelp and values.fixedCFrame then
+                hrp.CFrame = values.fixedCFrame
+            else
+                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                if tgtRoot and hrp and hrp.Parent then
+                    local angle = (tick() * 200) % 360
+                    local rad = math.rad(angle)
+                    local offset = Vector3.new(math.sin(rad), 0, math.cos(rad)) * values.helpDistance
+                    hrp.CFrame = CFrame.new(tgtRoot.Position + offset, tgtRoot.Position)
+                end
+            end
+        end)
+
         task.wait(0.05)
     end
 
@@ -894,7 +792,6 @@ helpTargetButton.MouseButton1Click:Connect(function()
         helpTargetInfo.TextColor3 = THEME.accent
 
         connections.helpTarget = task.spawn(function()
-
             local function waitForAliveCharacter(timeout)
                 local t = tick()
                 while tick() - t < (timeout or 15) do
@@ -922,9 +819,10 @@ helpTargetButton.MouseButton1Click:Connect(function()
                     if not (hrp and hrp.Parent) then return end
                     local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
                     if tgtRoot then
-                        local lookDir = tgtRoot.CFrame.LookVector
-                        local newPos = tgtRoot.Position + (lookDir * values.helpDistance)
-                        local newCFrame = CFrame.new(newPos, newPos + lookDir)
+                        local angle = (tick() * 200) % 360
+                        local rad = math.rad(angle)
+                        local offset = Vector3.new(math.sin(rad), 0, math.cos(rad)) * values.helpDistance
+                        local newCFrame = CFrame.new(tgtRoot.Position + offset, tgtRoot.Position)
                         hrp.CFrame = newCFrame
                         values.fixedCFrame = newCFrame
                     end
@@ -933,16 +831,17 @@ helpTargetButton.MouseButton1Click:Connect(function()
 
             while toggles.helpTarget do
                 local tgt = values.targetPlayer
+
                 local _, hrp, hum = waitForAliveCharacter(15)
                 if not hrp then task.wait(0.5) continue end
                 if not toggles.helpTarget then break end
 
-                local savedFixedCFrame = values.fixedCFrame
+                local savedFC = values.fixedCFrame
                 values.fixedCFrame = nil
                 teleportToLobby(hrp)
                 task.wait(0.5)
                 if not toggles.helpTarget then break end
-                values.fixedCFrame = savedFixedCFrame
+                values.fixedCFrame = savedFC
 
                 local teleportSuccess = false
                 local tpStart = tick()
@@ -962,17 +861,17 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 if not toggles.helpTarget then break end
                 if not teleportSuccess then continue end
 
+                local helpDone   = false
                 local lobbyStuck = false
-                local helpDone = false
                 local lobbyStuckTimer = 0
-                local lastCheckPos = nil
+                local lastCheckPos    = nil
 
                 local lobbyStuckLoop = task.spawn(function()
                     while not helpDone and toggles.helpTarget do
                         local myPos = hrp and hrp.Parent and hrp.Position
                         if myPos then
                             if not lastCheckPos then lastCheckPos = myPos end
-                            local notMoving = (myPos - lastCheckPos).Magnitude <= 10
+                            local moved = (myPos - lastCheckPos).Magnitude
                             local nearRamp = false
                             pcall(function()
                                 local lobby = Workspace:FindFirstChild("Lobby")
@@ -989,11 +888,12 @@ helpTargetButton.MouseButton1Click:Connect(function()
                                     end
                                 end
                             end)
-                            if notMoving and nearRamp then
+                            if moved <= 10 and nearRamp then
                                 lobbyStuckTimer = lobbyStuckTimer + 0.2
                                 if lobbyStuckTimer >= 5 then lobbyStuck = true helpDone = true end
                             else
-                                lobbyStuckTimer = 0 lastCheckPos = myPos
+                                lobbyStuckTimer = 0
+                                lastCheckPos = myPos
                             end
                         end
                         task.wait(0.2)
@@ -1006,14 +906,18 @@ helpTargetButton.MouseButton1Click:Connect(function()
                         local character = player.Character
                         local hasTool = false
                         if character then
-                            for _, obj in ipairs(character:GetChildren()) do if obj:IsA("Tool") then hasTool = true break end end
+                            for _, obj in ipairs(character:GetChildren()) do
+                                if obj:IsA("Tool") then hasTool = true break end
+                            end
                             local bp = player:FindFirstChildOfClass("Backpack")
                             if bp then for _, obj in ipairs(bp:GetChildren()) do if obj:IsA("Tool") then hasTool = true break end end end
                         end
                         if not hasTool then
                             noToolTimer = noToolTimer + 0.1
                             if noToolTimer >= 0.5 then lobbyStuck = true helpDone = true end
-                        else noToolTimer = 0 end
+                        else
+                            noToolTimer = 0
+                        end
                         task.wait(0.1)
                     end
                 end)
@@ -1045,7 +949,7 @@ helpTargetButton.MouseButton1Click:Connect(function()
 
         helpTargetButton.Text = "解除"
         helpTargetButton.BackgroundColor3 = THEME.red
-        helpTargetFrame.BackgroundColor3 = Color3.fromRGB(22, 10, 42)
+        helpTargetFrame.BackgroundColor3 = Color3.fromRGB(20, 8, 40)
     else
         helpTargetInfo.Text = "目標: 無"
         helpTargetInfo.TextColor3 = THEME.textMuted
@@ -1056,6 +960,12 @@ helpTargetButton.MouseButton1Click:Connect(function()
         helpTargetFrame.BackgroundColor3 = THEME.bgRow
     end
     updateStatus()
+end)
+
+helpDistanceInput.FocusLost:Connect(function()
+    local val = tonumber(helpDistanceInput.Text)
+    if val and val > 0 then values.helpDistance = val
+    else helpDistanceInput.Text = tostring(values.helpDistance) end
 end)
 
 -- ============================================================
@@ -1090,17 +1000,19 @@ miniFrame.BackgroundColor3 = THEME.titleBg
 miniFrame.Visible = false
 miniFrame.Parent = screenGui
 Instance.new("UICorner", miniFrame).CornerRadius = UDim.new(0, 6)
-local s2 = Instance.new("UIStroke") s2.Color = THEME.primaryDark s2.Thickness = 1.5 s2.Parent = miniFrame
+
+local stroke2 = Instance.new("UIStroke")
+stroke2.Color = THEME.primaryDark
+stroke2.Thickness = 1.5
+stroke2.Parent = miniFrame
 
 local miniTitle = Instance.new("TextLabel")
 miniTitle.Text = "幻影精通"
 miniTitle.Size = UDim2.new(1, -36, 1, 0)
-miniTitle.Position = UDim2.new(0, 8, 0, 0)
 miniTitle.BackgroundTransparency = 1
 miniTitle.Font = Enum.Font.GothamBold
 miniTitle.TextSize = 14
 miniTitle.TextColor3 = THEME.accent
-miniTitle.TextXAlignment = Enum.TextXAlignment.Left
 miniTitle.Parent = miniFrame
 
 local expandButton = Instance.new("TextButton")
@@ -1109,7 +1021,6 @@ expandButton.Size = UDim2.new(0, 24, 0, 24)
 expandButton.Position = UDim2.new(1, -28, 0, 4)
 expandButton.BackgroundColor3 = THEME.primary
 expandButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-expandButton.Font = Enum.Font.GothamBold
 expandButton.Parent = miniFrame
 Instance.new("UICorner", expandButton).CornerRadius = UDim.new(0, 5)
 
@@ -1126,7 +1037,9 @@ closeButton.MouseButton1Click:Connect(function()
         end
     end
     if posLockLoop then task.cancel(posLockLoop) end
+    faceTargetRunning = false
+    if faceTargetLoop then task.cancel(faceTargetLoop) end
     screenGui:Destroy()
 end)
 
-print("貓玲的幻影精通腳本 v0.2 已載入!")
+print("貓玲的幻影精通腳本 v0.1 已載入!")
