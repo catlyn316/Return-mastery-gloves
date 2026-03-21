@@ -1,4 +1,4 @@
--- 貓玲的泡泡精通腳本 v0.5
+-- 貓玲的泡泡精通腳本 v0.6
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -30,7 +30,7 @@ local values = {
     attackInterval   = 1.5,
     abilityInterval  = 6.0,
     helpDistance     = 15,
-    helpMode         = "被打後不重置",
+    helpMode         = "被打時重置",
     targetPlayer     = nil,
     fixedCFrame      = nil,
     bubbleHitCount   = 0,
@@ -439,8 +439,8 @@ helpTargetInfo.Parent = helpTargetFrame
 local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離:", "15", "格", 2)
 
 local helpModeFrame, helpModeButton = createWideButtonRow(
-    page2, "幫助模式:", "被打後不重置",
-    Color3.fromRGB(30, 100, 160), 3
+    page2, "幫助模式:", "被打時重置",
+    Color3.fromRGB(110, 60, 40), 3
 )
 
 local fixedPosHelpFrame, fixedPosHelpStatus, fixedPosHelpButton = createRow(page2, "傳送後固定:", "啟用", "解除", 4)
@@ -578,25 +578,41 @@ end
 
 -- ============================================================
 -- 攻擊者主邏輯
--- 流程：BubbleHit → wait(attackInterval) → BubbleThrow → 重複
+-- 流程：30 單位內有人 → BubbleHit → wait(attackInterval) → BubbleThrow → 重複
+-- 沒人在範圍內就等待
 -- ============================================================
+local function getNearest30()
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil, nil end
+    local myPos = char.HumanoidRootPart.Position
+    local nearest, minDist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local d = (p.Character.HumanoidRootPart.Position - myPos).Magnitude
+            if d < minDist then minDist = d nearest = p end
+        end
+    end
+    if nearest and minDist <= 30 then
+        return nearest, nearest.Character and nearest.Character:FindFirstChild("Torso")
+    end
+    return nil, nil
+end
+
 local function runAttackerLoop()
     while toggles.attacker do
         local char = player.Character
         if not char then task.wait(0.2) continue end
 
-        local torso = getNearestTargetTorso()
+        local _, torso = getNearest30()
         if torso then
             pcall(function() ReplicatedStorage.BubbleHit:FireServer(torso) end)
+            task.wait(values.attackInterval)
+            if not toggles.attacker then break end
+            pcall(function() ReplicatedStorage.BubbleThrow:FireServer() end)
+            task.wait(0.1)
+        else
+            task.wait(0.1)
         end
-
-        task.wait(values.attackInterval)
-
-        if not toggles.attacker then break end
-
-        pcall(function() ReplicatedStorage.BubbleThrow:FireServer() end)
-
-        task.wait(0.1)
     end
 end
 
@@ -614,12 +630,17 @@ attackerButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 自動能力：每 abilityInterval 秒 BubbleThrow 一次
+-- 自動能力：30 單位內有人時，每 abilityInterval 秒 BubbleThrow 一次
 -- ============================================================
 local function runAutoAbilityLoop()
     while toggles.autoAbility do
-        pcall(function() ReplicatedStorage.BubbleThrow:FireServer() end)
-        task.wait(values.abilityInterval)
+        local _, torso = getNearest30()
+        if torso then
+            pcall(function() ReplicatedStorage.BubbleThrow:FireServer() end)
+            task.wait(values.abilityInterval)
+        else
+            task.wait(0.1)
+        end
     end
 end
 
@@ -637,17 +658,17 @@ autoAbilityButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 幫助模式切換（預設被打後不重置）
+-- 幫助模式切換（預設被打時重置）
 -- ============================================================
 helpModeButton.MouseButton1Click:Connect(function()
-    if values.helpMode == "被打後不重置" then
-        values.helpMode = "被打時重置"
-        helpModeButton.Text = "被打時重置"
-        helpModeButton.BackgroundColor3 = Color3.fromRGB(110, 60, 40)
-    else
+    if values.helpMode == "被打時重置" then
         values.helpMode = "被打後不重置"
         helpModeButton.Text = "被打後不重置"
         helpModeButton.BackgroundColor3 = Color3.fromRGB(30, 100, 160)
+    else
+        values.helpMode = "被打時重置"
+        helpModeButton.Text = "被打時重置"
+        helpModeButton.BackgroundColor3 = Color3.fromRGB(110, 60, 40)
     end
     values.helpDistance = 15
     helpDistanceInput.Text = "15"
@@ -802,11 +823,41 @@ end
 
 -- ============================================================
 -- 幫助者位置迴圈：被打時重置
--- 監聽 folder.ChildAdded 等 LastSlappedBy 出現，出現後立即讀值判斷
+-- 監聽 folder.ChildAdded 等 LastSlappedBy 出現，出現後：
+--   目標 Glove == "Bubble" → 等觸碰泡泡後才重置
+--   目標 Glove != "Bubble" → 直接重置
 -- ============================================================
 local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
     local resetTriggered = false
     local folderConn     = nil
+
+    local function doReset()
+        if resetTriggered then return end
+        resetTriggered = true
+        if folderConn then pcall(function() folderConn:Disconnect() end) end
+        pcall(function() Players.LocalPlayer.Reset:FireServer() end)
+        task.wait(0.1)
+        onDone()
+    end
+
+    local function isBubbleGlove()
+        local ok, result = pcall(function()
+            return tostring(tgt.leaderstats.Glove.Value) == "Bubble"
+        end)
+        return ok and result
+    end
+
+    -- 被打後觸碰泡泡再重置（目標是 Bubble 手套時）
+    local function waitBubbleThenReset()
+        local stopBubble = startBubbleDetector(hrp, function()
+            doReset()
+        end)
+        -- 若偵測器外部停止（帮助结束）也要停掉
+        task.spawn(function()
+            while not resetTriggered and toggles.helpTarget do task.wait(0.1) end
+            stopBubble()
+        end)
+    end
 
     local function setupFolderConn()
         if folderConn then pcall(function() folderConn:Disconnect() end) end
@@ -816,13 +867,15 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
             folderConn = folder.ChildAdded:Connect(function(child)
                 if resetTriggered then return end
                 if child.Name == "LastSlappedBy" then
-                    local val = tostring(child.Value)
-                    if val == tgt.Name then
-                        resetTriggered = true
-                        if folderConn then pcall(function() folderConn:Disconnect() end) end
-                        pcall(function() Players.LocalPlayer.Reset:FireServer() end)
-                        task.wait(0.1)
-                        onDone()
+                    if tostring(child.Value) == tgt.Name then
+                        if isBubbleGlove() then
+                            -- 是 Bubble 手套：先等觸碰泡泡再重置
+                            if folderConn then pcall(function() folderConn:Disconnect() end) folderConn = nil end
+                            waitBubbleThenReset()
+                        else
+                            -- 不是 Bubble 手套：直接重置
+                            doReset()
+                        end
                     end
                 end
             end)
@@ -835,7 +888,6 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        -- folder 可能還不存在，持續嘗試綁定
         if not folderConn then
             setupFolderConn()
         end
@@ -1150,4 +1202,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的泡泡精通腳本 v0.5 已載入!")
+print("貓玲的泡泡精通腳本 v0.6 已載入!")
