@@ -1,4 +1,4 @@
--- 貓玲的泡泡精通腳本 v0.6
+-- 貓玲的泡泡精通腳本 v0.7
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -822,9 +822,49 @@ local function runHelpLoopNoReset(hrp, hum, tgt, onDone)
 end
 
 -- ============================================================
+-- BubbleObject 即時偵測（被打時重置 + Bubble手套 專用）
+-- firetouchinterest 觸發後立刻回呼，不等消失
+-- ============================================================
+local function startBubbleDetectorInstant(hrp, onHit)
+    local running = true
+    local tracked = {}
+
+    local thread = task.spawn(function()
+        while running and toggles.helpTarget do
+            if hrp and hrp.Parent then
+                local myPos = hrp.Position
+                for _, obj in ipairs(Workspace:GetChildren()) do
+                    if obj.Name == "BubbleObject" and not tracked[obj] then
+                        local hitbox = obj:FindFirstChild("Hitbox")
+                        if hitbox and hitbox.Parent then
+                            if (hitbox.Position - myPos).Magnitude <= 200 then
+                                tracked[obj] = true
+                                pcall(function()
+                                    firetouchinterest(hrp, hitbox, 0)
+                                end)
+                                -- 觸發後立刻回呼
+                                running = false
+                                onHit()
+                                return
+                            end
+                        end
+                    end
+                end
+            end
+            task.wait(0.1)
+        end
+    end)
+
+    return function()
+        running = false
+        pcall(function() task.cancel(thread) end)
+    end
+end
+
+-- ============================================================
 -- 幫助者位置迴圈：被打時重置
 -- 監聽 folder.ChildAdded 等 LastSlappedBy 出現，出現後：
---   目標 Glove == "Bubble" → 等觸碰泡泡後才重置
+--   目標 Glove == "Bubble" → firetouchinterest 觸發後立刻重置
 --   目標 Glove != "Bubble" → 直接重置
 -- ============================================================
 local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
@@ -847,12 +887,11 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
         return ok and result
     end
 
-    -- 被打後觸碰泡泡再重置（目標是 Bubble 手套時）
+    -- 被打後觸發 TouchInterest 就立刻重置（目標是 Bubble 手套時）
     local function waitBubbleThenReset()
-        local stopBubble = startBubbleDetector(hrp, function()
+        local stopBubble = startBubbleDetectorInstant(hrp, function()
             doReset()
         end)
-        -- 若偵測器外部停止（帮助结束）也要停掉
         task.spawn(function()
             while not resetTriggered and toggles.helpTarget do task.wait(0.1) end
             stopBubble()
@@ -1202,4 +1241,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的泡泡精通腳本 v0.6 已載入!")
+print("貓玲的泡泡精通腳本 v0.7 已載入!")
