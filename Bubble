@@ -1,4 +1,4 @@
--- 貓玲的泡泡精通腳本 v0.7
+-- 貓玲的泡泡精通腳本 v0.8
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -823,7 +823,10 @@ end
 
 -- ============================================================
 -- BubbleObject 即時偵測（被打時重置 + Bubble手套 專用）
--- firetouchinterest 觸發後立刻回呼，不等消失
+-- 流程：
+--   1. 偵測到 200 單位內的 BubbleObject → 觸發 firetouchinterest
+--   2. 觸發後確認自己與該 BubbleObject 距離 <= 20 單位持續 2 秒
+--   3. 條件滿足後才回呼重置
 -- ============================================================
 local function startBubbleDetectorInstant(hrp, onHit)
     local running = true
@@ -842,10 +845,28 @@ local function startBubbleDetectorInstant(hrp, onHit)
                                 pcall(function()
                                     firetouchinterest(hrp, hitbox, 0)
                                 end)
-                                -- 觸發後立刻回呼
-                                running = false
-                                onHit()
-                                return
+
+                                -- 確認距離 <= 20 單位持續 2 秒
+                                local capturedObj = obj
+                                task.spawn(function()
+                                    local closeTimer = 0
+                                    while running and toggles.helpTarget do
+                                        if not (hrp and hrp.Parent) then break end
+                                        if not (capturedObj and capturedObj.Parent) then break end
+                                        local hb = capturedObj:FindFirstChild("Hitbox")
+                                        if hb and (hb.Position - hrp.Position).Magnitude <= 20 then
+                                            closeTimer = closeTimer + 0.1
+                                            if closeTimer >= 2 then
+                                                running = false
+                                                onHit()
+                                                return
+                                            end
+                                        else
+                                            closeTimer = 0
+                                        end
+                                        task.wait(0.1)
+                                    end
+                                end)
                             end
                         end
                     end
@@ -1241,4 +1262,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的泡泡精通腳本 v0.7 已載入!")
+print("貓玲的泡泡精通腳本 v0.8 已載入!")
