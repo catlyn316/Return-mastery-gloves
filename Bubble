@@ -1,4 +1,4 @@
--- 貓玲的泡泡精通腳本 v0.3
+-- 貓玲的泡泡精通腳本 v0.4
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -29,7 +29,7 @@ local toggles = {
 local values = {
     attackInterval   = 1.5,
     abilityInterval  = 6.0,
-    helpDistance     = 20,
+    helpDistance     = 15,
     helpMode         = "被打後不重置",
     targetPlayer     = nil,
     fixedCFrame      = nil,
@@ -436,7 +436,7 @@ helpTargetInfo.TextXAlignment = Enum.TextXAlignment.Left
 helpTargetInfo.TextWrapped = true
 helpTargetInfo.Parent = helpTargetFrame
 
-local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離:", "20", "格", 2)
+local helpDistanceFrame, helpDistanceInput = createInputRow(page2, "設定距離:", "15", "格", 2)
 
 local helpModeFrame, helpModeButton = createWideButtonRow(
     page2, "幫助模式:", "被打後不重置",
@@ -649,8 +649,8 @@ helpModeButton.MouseButton1Click:Connect(function()
         helpModeButton.Text = "被打後不重置"
         helpModeButton.BackgroundColor3 = Color3.fromRGB(30, 100, 160)
     end
-    values.helpDistance = 20
-    helpDistanceInput.Text = "20"
+    values.helpDistance = 15
+    helpDistanceInput.Text = "15"
 end)
 
 -- ============================================================
@@ -802,56 +802,40 @@ end
 
 -- ============================================================
 -- 幫助者位置迴圈：被打時重置
--- 立即偵測 Ragdolled + LastSlappedBy，第一下命中就處理
+-- 監聽 LastSlappedBy.Changed，只要值變成目標名稱就立刻重置
 -- ============================================================
 local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
-    local ragdolledObj = nil
-    pcall(function()
-        local folder = Workspace:FindFirstChild(player.Name)
-        if folder then ragdolledObj = folder:FindFirstChild("Ragdolled") end
-    end)
-
     local resetTriggered = false
-    local ragdolledConn = nil
+    local slappedByConn  = nil
 
-    local function setupRagdolledConn()
-        if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
-        if not ragdolledObj or not ragdolledObj.Parent then return end
-        ragdolledConn = ragdolledObj.Changed:Connect(function(newVal)
-            if resetTriggered then return end
-            if newVal == true then
-                -- 立即讀取 LastSlappedBy，不等第二下
-                local slappedBy = ""
-                pcall(function()
-                    local folder = Workspace:FindFirstChild(player.Name)
-                    if folder then
-                        local obj = folder:FindFirstChild("LastSlappedBy")
-                        if obj then slappedBy = tostring(obj.Value) or "" end
-                    end
-                end)
-                if slappedBy == tgt.Name then
+    local function setupSlappedByConn()
+        if slappedByConn then pcall(function() slappedByConn:Disconnect() end) end
+        pcall(function()
+            local folder = Workspace:FindFirstChild(player.Name)
+            local slappedByObj = folder and folder:FindFirstChild("LastSlappedBy")
+            if not slappedByObj then return end
+            slappedByConn = slappedByObj.Changed:Connect(function(newVal)
+                if resetTriggered then return end
+                if tostring(newVal) == tgt.Name then
                     resetTriggered = true
-                    if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
+                    if slappedByConn then pcall(function() slappedByConn:Disconnect() end) end
                     pcall(function() Players.LocalPlayer.Reset:FireServer() end)
                     task.wait(0.1)
                     onDone()
                 end
-            end
+            end)
         end)
     end
 
-    setupRagdolledConn()
+    setupSlappedByConn()
 
     while toggles.helpTarget and not resetTriggered do
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        if not ragdolledObj or not ragdolledObj.Parent then
-            pcall(function()
-                local folder = Workspace:FindFirstChild(player.Name)
-                if folder then ragdolledObj = folder:FindFirstChild("Ragdolled") end
-            end)
-            setupRagdolledConn()
+        -- 若連線失效（例如 folder 剛出現）則重新綁定
+        if not slappedByConn then
+            setupSlappedByConn()
         end
 
         pcall(function()
@@ -870,7 +854,7 @@ local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
         task.wait(0.05)
     end
 
-    if ragdolledConn then pcall(function() ragdolledConn:Disconnect() end) end
+    if slappedByConn then pcall(function() slappedByConn:Disconnect() end) end
     if not resetTriggered then onDone() end
 end
 
@@ -1164,4 +1148,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的泡泡精通腳本 v0.3 已載入!")
+print("貓玲的泡泡精通腳本 v0.4 已載入!")
