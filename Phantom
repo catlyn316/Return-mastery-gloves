@@ -1,4 +1,4 @@
--- 貓玲的幻影精通腳本 v0.1
+-- 貓玲的幻影精通腳本 v0.2
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -7,7 +7,6 @@ local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- 清理舊GUI
 pcall(function() if CoreGui:FindFirstChild("PhantomMasterUI") then CoreGui.PhantomMasterUI:Destroy() end end)
 pcall(function() if playerGui:FindFirstChild("PhantomMasterUI") then playerGui.PhantomMasterUI:Destroy() end end)
 pcall(function()
@@ -351,11 +350,11 @@ end
 -- ============================================================
 -- 頁面1：攻擊者
 -- ============================================================
-local attackerFrame, attackerStatus, attackerButton          = createRow(page1, "自動攻擊:", "關閉", "啟動", 1)
-local phaseFrame, phaseStatus, _noBtn                        = createRow(page1, "當前狀態:", "待機", "─", 2)
+local attackerFrame, attackerStatus, attackerButton = createRow(page1, "自動攻擊:", "關閉", "啟動", 1)
+local phaseFrame, phaseStatus, _noBtn               = createRow(page1, "當前狀態:", "待機", "─", 2)
 _noBtn.Visible = false
-local attackIntervalFrame, attackIntervalInput               = createInputRow(page1, "連擊間隔:", "0.15", "秒", 3)
-local fixedPosFrame, fixedPosStatus, fixedPosButton          = createRow(page1, "固定位置:", "關閉", "啟動", 4)
+local attackIntervalFrame, attackIntervalInput      = createInputRow(page1, "連擊間隔:", "0.15", "秒", 3)
+local fixedPosFrame, fixedPosStatus, fixedPosButton = createRow(page1, "固定位置:", "關閉", "啟動", 4)
 
 -- ============================================================
 -- 頁面2：幫助者
@@ -504,9 +503,7 @@ attackIntervalInput.FocusLost:Connect(function()
     else attackIntervalInput.Text = tostring(values.attackInterval) end
 end)
 
--- ============================================================
--- 攻擊者：面向鎖定目標（鎖定首個偵測到的目標，不切換）
--- ============================================================
+-- 面向目標
 local lockedTarget      = nil
 local faceTargetLoop    = nil
 local faceTargetRunning = false
@@ -580,7 +577,7 @@ local function runAttackerLoop()
             end
         end)
 
-        -- 步驟3：2.5 秒隱身期間持續攻擊
+        -- 步驟3：2.5 秒隱身期間持續攻擊同一目標
         local dashEnd = tick() + 2.5
         while tick() < dashEnd and toggles.attacker do
             local remaining = math.floor((dashEnd - tick()) * 10) / 10
@@ -595,7 +592,7 @@ local function runAttackerLoop()
         end
         if not toggles.attacker then break end
 
-        -- 步驟4：6 秒冷卻
+        -- 步驟4：6 秒冷卻（從隱身結束後起算）
         local cooldownEnd = tick() + 6.0
         while tick() < cooldownEnd and toggles.attacker do
             local remaining = math.ceil(cooldownEnd - tick())
@@ -638,7 +635,6 @@ helpModeButton.MouseButton1Click:Connect(function()
     end
 end)
 
--- 幫助者固定位置（預設關閉）
 fixedPosHelpButton.MouseButton1Click:Connect(function()
     toggles.fixedPosHelp = not toggles.fixedPosHelp
     if toggles.fixedPosHelp then
@@ -657,9 +653,18 @@ fixedPosHelpButton.MouseButton1Click:Connect(function()
 end)
 
 -- ============================================================
--- 幫助者：被打後不重置（持續圓形繞行貼身碰撞）
+-- 幫助者核心迴圈
+-- 目標：輸入的「攻擊者」玩家
+-- 持續圓形繞行貼身攻擊者，造成碰撞
+-- 被打後不重置：只要自己被攻擊者打就不重置，等 onDone 外部觸發
+-- 被打時重置：只要 LastSlappedBy 是攻擊者就立刻重置
+--
+-- 注意：這裡「打」的判定是 LastSlappedBy == 攻擊者名
+--   被打後不重置 → 完全忽略 LastSlappedBy，持續繞直到外部停止
+--   被打時重置   → 偵測到 LastSlappedBy 就立刻重置
 -- ============================================================
-local function runHelpLoopNoReset(hrp, hum, tgt, onDone)
+local function runHelpLoop(hrp, hum, tgt, onDone)
+    -- tgt 是攻擊者玩家 Player 物件，幫助者要持續貼著攻擊者身上碰撞
     local resetTriggered = false
     local folderConn     = nil
 
@@ -672,108 +677,73 @@ local function runHelpLoopNoReset(hrp, hum, tgt, onDone)
         onDone()
     end
 
-    local function setupFolderConn()
-        if folderConn then pcall(function() folderConn:Disconnect() end) end
-        pcall(function()
-            local folder = Workspace:FindFirstChild(player.Name)
-            if not folder then return end
-            folderConn = folder.ChildAdded:Connect(function(child)
-                if resetTriggered then return end
-                if child.Name == "LastSlappedBy" and tostring(child.Value) == tgt.Name then
-                    doReset()
+    -- 只有「被打時重置」模式才需要監聽
+    if values.helpMode == "被打時重置" then
+        local function setupFolderConn()
+            if folderConn then pcall(function() folderConn:Disconnect() end) end
+            pcall(function()
+                local folder = Workspace:FindFirstChild(player.Name)
+                if not folder then return end
+                folderConn = folder.ChildAdded:Connect(function(child)
+                    if resetTriggered then return end
+                    if child.Name == "LastSlappedBy" and tostring(child.Value) == tgt.Name then
+                        doReset()
+                    end
+                end)
+            end)
+        end
+        setupFolderConn()
+
+        while toggles.helpTarget and not resetTriggered do
+            if not (hrp and hrp.Parent) then break end
+            if hum.Health <= 0 then break end
+            if not folderConn then setupFolderConn() end
+
+            pcall(function()
+                if toggles.fixedPosHelp and values.fixedCFrame then
+                    hrp.CFrame = values.fixedCFrame
+                else
+                    -- 直接傳到目標身上，確保碰撞
+                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                    if tgtRoot and hrp and hrp.Parent then
+                        hrp.CFrame = tgtRoot.CFrame
+                    end
                 end
             end)
-        end)
-    end
 
-    setupFolderConn()
+            task.wait(0.05)
+        end
 
-    while toggles.helpTarget and not resetTriggered do
-        if not (hrp and hrp.Parent) then break end
-        if hum.Health <= 0 then break end
-        if not folderConn then setupFolderConn() end
-
-        pcall(function()
-            if toggles.fixedPosHelp and values.fixedCFrame then
-                hrp.CFrame = values.fixedCFrame
-            else
-                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                if tgtRoot and hrp and hrp.Parent then
-                    local angle = (tick() * 200) % 360
-                    local rad = math.rad(angle)
-                    local offset = Vector3.new(math.sin(rad), 0, math.cos(rad)) * values.helpDistance
-                    hrp.CFrame = CFrame.new(tgtRoot.Position + offset, tgtRoot.Position)
-                end
-            end
-        end)
-
-        task.wait(0.05)
-    end
-
-    if folderConn then pcall(function() folderConn:Disconnect() end) end
-    if not resetTriggered then onDone() end
-end
-
--- ============================================================
--- 幫助者：被打時重置
--- ============================================================
-local function runHelpLoopSlappedReset(hrp, hum, tgt, onDone)
-    local resetTriggered = false
-    local folderConn     = nil
-
-    local function doReset()
-        if resetTriggered then return end
-        resetTriggered = true
         if folderConn then pcall(function() folderConn:Disconnect() end) end
-        pcall(function() Players.LocalPlayer.Reset:FireServer() end)
-        task.wait(0.1)
-        onDone()
-    end
 
-    local function setupFolderConn()
-        if folderConn then pcall(function() folderConn:Disconnect() end) end
-        pcall(function()
-            local folder = Workspace:FindFirstChild(player.Name)
-            if not folder then return end
-            folderConn = folder.ChildAdded:Connect(function(child)
-                if resetTriggered then return end
-                if child.Name == "LastSlappedBy" and tostring(child.Value) == tgt.Name then
-                    doReset()
+    else
+        -- 被打後不重置：完全不監聽 LastSlappedBy，只是持續繞行貼身
+        while toggles.helpTarget and not resetTriggered do
+            if not (hrp and hrp.Parent) then break end
+            if hum.Health <= 0 then break end
+
+            pcall(function()
+                if toggles.fixedPosHelp and values.fixedCFrame then
+                    hrp.CFrame = values.fixedCFrame
+                else
+                    -- 直接傳到目標身上，確保碰撞
+                    local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
+                    if tgtRoot and hrp and hrp.Parent then
+                        hrp.CFrame = tgtRoot.CFrame
+                    end
                 end
             end)
-        end)
+
+            task.wait(0.05)
+        end
     end
 
-    setupFolderConn()
-
-    while toggles.helpTarget and not resetTriggered do
-        if not (hrp and hrp.Parent) then break end
-        if hum.Health <= 0 then break end
-        if not folderConn then setupFolderConn() end
-
-        pcall(function()
-            if toggles.fixedPosHelp and values.fixedCFrame then
-                hrp.CFrame = values.fixedCFrame
-            else
-                local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
-                if tgtRoot and hrp and hrp.Parent then
-                    local angle = (tick() * 200) % 360
-                    local rad = math.rad(angle)
-                    local offset = Vector3.new(math.sin(rad), 0, math.cos(rad)) * values.helpDistance
-                    hrp.CFrame = CFrame.new(tgtRoot.Position + offset, tgtRoot.Position)
-                end
-            end
-        end)
-
-        task.wait(0.05)
-    end
-
-    if folderConn then pcall(function() folderConn:Disconnect() end) end
     if not resetTriggered then onDone() end
 end
 
 -- ============================================================
 -- 幫助目標主邏輯
+-- 輸入的是「攻擊者」玩家名，幫助者貼著攻擊者碰撞
 -- ============================================================
 helpTargetButton.MouseButton1Click:Connect(function()
     toggles.helpTarget = not toggles.helpTarget
@@ -819,12 +789,8 @@ helpTargetButton.MouseButton1Click:Connect(function()
                     if not (hrp and hrp.Parent) then return end
                     local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
                     if tgtRoot then
-                        local angle = (tick() * 200) % 360
-                        local rad = math.rad(angle)
-                        local offset = Vector3.new(math.sin(rad), 0, math.cos(rad)) * values.helpDistance
-                        local newCFrame = CFrame.new(tgtRoot.Position + offset, tgtRoot.Position)
-                        hrp.CFrame = newCFrame
-                        values.fixedCFrame = newCFrame
+                        hrp.CFrame = tgtRoot.CFrame
+                        values.fixedCFrame = tgtRoot.CFrame
                     end
                 end)
             end
@@ -850,7 +816,7 @@ helpTargetButton.MouseButton1Click:Connect(function()
                     pcall(function()
                         local tgtRoot = tgt.Character and tgt.Character:FindFirstChild("HumanoidRootPart")
                         if tgtRoot and hrp and hrp.Parent then
-                            if (tgtRoot.Position - hrp.Position).Magnitude <= (values.helpDistance + 5) then
+                            if (tgtRoot.Position - hrp.Position).Magnitude <= 5 then
                                 teleportSuccess = true
                             end
                         end
@@ -879,7 +845,11 @@ helpTargetButton.MouseButton1Click:Connect(function()
                                     for _, obj in ipairs(lobby:GetChildren()) do
                                         if obj.Name == "LobbyRamp" then
                                             local parts = obj:IsA("BasePart") and {obj} or {}
-                                            if #parts == 0 then for _, p in ipairs(obj:GetDescendants()) do if p:IsA("BasePart") then table.insert(parts, p) end end end
+                                            if #parts == 0 then
+                                                for _, p in ipairs(obj:GetDescendants()) do
+                                                    if p:IsA("BasePart") then table.insert(parts, p) end
+                                                end
+                                            end
                                             for _, part in ipairs(parts) do
                                                 if (part.Position - myPos).Magnitude <= 50 then nearRamp = true break end
                                             end
@@ -910,7 +880,11 @@ helpTargetButton.MouseButton1Click:Connect(function()
                                 if obj:IsA("Tool") then hasTool = true break end
                             end
                             local bp = player:FindFirstChildOfClass("Backpack")
-                            if bp then for _, obj in ipairs(bp:GetChildren()) do if obj:IsA("Tool") then hasTool = true break end end end
+                            if bp then
+                                for _, obj in ipairs(bp:GetChildren()) do
+                                    if obj:IsA("Tool") then hasTool = true break end
+                                end
+                            end
                         end
                         if not hasTool then
                             noToolTimer = noToolTimer + 0.1
@@ -922,19 +896,11 @@ helpTargetButton.MouseButton1Click:Connect(function()
                     end
                 end)
 
-                if values.helpMode == "被打後不重置" then
-                    local helpConn = task.spawn(function()
-                        runHelpLoopNoReset(hrp, hum, tgt, function() helpDone = true end)
-                    end)
-                    while not helpDone and toggles.helpTarget do task.wait(0.1) end
-                    task.cancel(helpConn)
-                else
-                    local helpConn = task.spawn(function()
-                        runHelpLoopSlappedReset(hrp, hum, tgt, function() helpDone = true end)
-                    end)
-                    while not helpDone and toggles.helpTarget do task.wait(0.1) end
-                    task.cancel(helpConn)
-                end
+                local helpConn = task.spawn(function()
+                    runHelpLoop(hrp, hum, tgt, function() helpDone = true end)
+                end)
+                while not helpDone and toggles.helpTarget do task.wait(0.1) end
+                task.cancel(helpConn)
 
                 helpDone = true
                 task.cancel(lobbyStuckLoop)
@@ -968,9 +934,7 @@ helpDistanceInput.FocusLost:Connect(function()
     else helpDistanceInput.Text = tostring(values.helpDistance) end
 end)
 
--- ============================================================
 -- 拖曳
--- ============================================================
 local function enableDrag(frame, dragHandle)
     local dragging, dragStart, startPos, dragInput = false, nil, nil, nil
     local function update(input)
@@ -1042,4 +1006,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的幻影精通腳本 v0.1 已載入!")
+print("貓玲的幻影精通腳本 v0.2 已載入!")
