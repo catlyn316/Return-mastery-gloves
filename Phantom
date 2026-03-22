@@ -353,7 +353,7 @@ end
 local attackerFrame, attackerStatus, attackerButton = createRow(page1, "自動攻擊:", "關閉", "啟動", 1)
 local phaseFrame, phaseStatus, _noBtn               = createRow(page1, "當前狀態:", "待機", "─", 2)
 _noBtn.Visible = false
-local attackIntervalFrame, attackIntervalInput      = createInputRow(page1, "連擊間隔:", "0.15", "秒", 3)
+local attackIntervalFrame, attackIntervalInput      = createInputRow(page1, "連擊間隔:", "0.6", "秒", 3)
 local fixedPosFrame, fixedPosStatus, fixedPosButton = createRow(page1, "固定位置:", "關閉", "啟動", 4)
 
 -- ============================================================
