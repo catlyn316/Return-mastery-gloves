@@ -1,4 +1,4 @@
--- 貓玲的 5 More 精通刷取腳本 v1.0
+-- 貓玲的 5 More 精通刷取腳本 v2.0
 -- 分區：通用攻擊 / 幫助者 / 說明
 
 local CoreGui           = game:GetService("CoreGui")
@@ -22,30 +22,29 @@ pcall(function()
 end)
 
 -- ============================================================
--- 主題（橘色，與模板一致）
+-- 主題（淡綠色）
 -- ============================================================
 local THEME = {
-    primary     = Color3.fromRGB(210, 100,  20),
-    primaryDark = Color3.fromRGB(130,  55,   5),
-    accent      = Color3.fromRGB(255, 200, 120),
-    bg          = Color3.fromRGB( 18,  10,   4),
-    bgRow       = Color3.fromRGB( 38,  22,   8),
-    bgInput     = Color3.fromRGB( 55,  30,  10),
-    titleBg     = Color3.fromRGB( 20,  10,   4),
-    tabBg       = Color3.fromRGB( 42,  24,   8),
-    tabActive   = Color3.fromRGB(150,  70,  15),
-    textMain    = Color3.fromRGB(255, 230, 190),
-    textSub     = Color3.fromRGB(240, 175, 100),
-    textMuted   = Color3.fromRGB(150,  95,  45),
+    primary     = Color3.fromRGB( 50, 160,  90),
+    primaryDark = Color3.fromRGB( 25,  90,  50),
+    accent      = Color3.fromRGB(160, 230, 180),
+    bg          = Color3.fromRGB(  8,  18,  12),
+    bgRow       = Color3.fromRGB( 14,  36,  22),
+    bgInput     = Color3.fromRGB( 18,  52,  32),
+    titleBg     = Color3.fromRGB(  8,  18,  12),
+    tabBg       = Color3.fromRGB( 16,  40,  26),
+    tabActive   = Color3.fromRGB( 35, 110,  65),
+    textMain    = Color3.fromRGB(200, 240, 215),
+    textSub     = Color3.fromRGB(120, 210, 155),
+    textMuted   = Color3.fromRGB( 65, 130,  90),
     red         = Color3.fromRGB(200,  45,  45),
-    green       = Color3.fromRGB( 40, 160,  80),
-    statusBg    = Color3.fromRGB( 12,   6,   2),
+    green       = Color3.fromRGB( 40, 200,  90),
+    statusBg    = Color3.fromRGB(  5,  12,   8),
 }
 
 -- ============================================================
 -- 工具函式
 -- ============================================================
--- 取得玩家 Glove leaderstat 值
 local function getGloveStat(p)
     local ls = p:FindFirstChild("leaderstats")
     if not ls then return nil end
@@ -54,26 +53,31 @@ local function getGloveStat(p)
     return g.Value
 end
 
--- 判斷自己是否 ragdoll（有 ragdoll 值或找 Ragdoll 物件）
+-- 修正版 ragdoll 判定：只用 Humanoid 狀態，不靠物件名
 local function isSelfRagdoll()
     local char = player.Character
     if not char then return true end
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum and hum:GetState() == Enum.HumanoidStateType.FallingDown then return true end
-    -- 有些手套 ragdoll 以物件判斷
-    if char:FindFirstChild("Ragdoll") then return true end
+    if not hum then return true end
+    local state = hum:GetState()
+    -- 只有 FallingDown（真正倒地）才算 ragdoll
+    -- Physics / GettingUp 等皆視為正常
+    if state == Enum.HumanoidStateType.FallingDown then
+        return true
+    end
+    -- 血量為 0 也算無效狀態
+    if hum.Health <= 0 then
+        return true
+    end
     return false
 end
 
--- 取得 _More 資料夾的最大數字（1～5）
 local function getMoreMax(targetName)
     local wsChar = Workspace:FindFirstChild(targetName)
     if not wsChar then return 0 end
     local max = 0
     for i = 1, 5 do
         if wsChar:FindFirstChild(tostring(i) .. "_More") or
-           -- 支援格式： "username_More["數字"]" 形式下 Roblox 存為子物件 key=數字 的情況
-           -- 實際上 workspace 裡是 "username_More" 資料夾，子物件名為數字字串
            (function()
                local moreFolder = wsChar:FindFirstChild(targetName .. "_More")
                if moreFolder then
@@ -84,10 +88,8 @@ local function getMoreMax(targetName)
             max = i
         end
     end
-    -- 另一種結構：workspace 直接有 "玩家名_More" 資料夾
     local moreFolder = Workspace:FindFirstChild(targetName .. "_More")
     if not moreFolder then
-        -- 嘗試在角色裡面找
         moreFolder = wsChar and wsChar:FindFirstChild("More")
     end
     if moreFolder then
@@ -100,7 +102,6 @@ local function getMoreMax(targetName)
     return max
 end
 
--- 找最近玩家（排除自己）
 local function getNearestPlayer()
     local char = player.Character
     local hrp  = char and char:FindFirstChild("HumanoidRootPart")
@@ -134,11 +135,11 @@ end
 parentUI(screenGui)
 
 -- ============================================================
--- 主框架
+-- 主框架（高度加大以容納新輸入框）
 -- ============================================================
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 280, 0, 310)
-mainFrame.Position = UDim2.new(0.5, -140, 0.5, -155)
+mainFrame.Size = UDim2.new(0, 280, 0, 340)
+mainFrame.Position = UDim2.new(0.5, -140, 0.5, -170)
 mainFrame.BackgroundColor3 = THEME.bg
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = screenGui
@@ -239,7 +240,7 @@ end
 -- 內容容器
 -- ============================================================
 local contentContainer = Instance.new("Frame")
-contentContainer.Size = UDim2.new(0.95, 0, 0, 216)
+contentContainer.Size = UDim2.new(0.95, 0, 0, 246)
 contentContainer.Position = UDim2.new(0.025, 0, 0, 68)
 contentContainer.BackgroundTransparency = 1
 contentContainer.ClipsDescendants = true
@@ -361,7 +362,7 @@ local function updateStatus()
 end
 
 -- ============================================================
--- 共用執行緒追蹤（供關閉按鈕清理用）
+-- 共用執行緒追蹤
 -- ============================================================
 local allThreads = {}
 local function trackThread(t)
@@ -375,13 +376,6 @@ end
 local p1 = pages[1]
 
 -- ── 1-1 偵測+攻擊 ─────────────────────────────────────────────
---[[
-  邏輯：
-  1. 找最近玩家，確認其 leaderstat.Glove == "5 More"
-  2. 偵測 workspace 有無 "[玩家名]_More" 資料夾，找其中最大數字子物件（1~5）
-  3. 對 workspace.[玩家名]_More 的每個數字（1～max）同時發動20次 GeneralHit
-  4. 每 attackInterval 秒重複一輪，直到關閉
---]]
 local r11 = makeRow(p1, 1, 56)
 makeLabel(r11, "偵測+攻擊:", 6, 0, 80, 34)
 local detectStatusLabel = Instance.new("TextLabel")
@@ -395,6 +389,26 @@ detectStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 detectStatusLabel.Parent = r11
 local detectBtn = makeButton(r11, "啟動", 210, 5, 42, 24)
 
+-- ── 1-1b 攻擊次數 ─────────────────────────────────────────────
+local r11b = makeRow(p1, 2, 34)
+makeLabel(r11b, "攻擊次數:", 6, 0, 80, 34)
+local attackCountInput = makeInput(r11b, "20", 88, 6, 56)
+attackCountInput.Text = "20"
+makeLabel(r11b, "次/目標", 148, 0, 70, 34, 10, THEME.textMuted)
+
+-- ── 1-2 攻擊間隔 ─────────────────────────────────────────────
+local r12 = makeRow(p1, 3, 34)
+makeLabel(r12, "攻擊間隔(秒):", 6, 0, 96, 34)
+local attackIntervalInput = makeInput(r12, "0.05", 104, 6, 60)
+attackIntervalInput.Text = "0.05"
+makeLabel(r12, "預設 0.05", 170, 0, 80, 34, 10, THEME.textMuted)
+
+-- ── 1-3 固定位置 ─────────────────────────────────────────────
+local r13 = makeRow(p1, 4, 34)
+makeLabel(r13, "固定位置:", 6, 0, 80, 34)
+local fixPosBtn1 = makeButton(r13, "啟動", 210, 5, 42, 24)
+
+-- 偵測+攻擊邏輯（放在輸入框定義之後）
 local detectRunning = false
 local detectThread  = nil
 
@@ -411,16 +425,12 @@ detectBtn.MouseButton1Click:Connect(function()
     detectRunning = not detectRunning
     if detectRunning then
         detectBtn.Text = "停止"; detectBtn.BackgroundColor3 = THEME.red
-        r11.BackgroundColor3 = Color3.fromRGB(20, 8, 4)
+        r11.BackgroundColor3 = Color3.fromRGB(8, 20, 12)
         activeFeatures["偵測攻擊"] = true; updateStatus()
 
         detectThread = trackThread(task.spawn(function()
             while detectRunning do
-                -- 取攻擊間隔（讀當前輸入）
-                local intervalRow = r12  -- 參照下方定義的 r12
-                -- 實際讀取在迴圈內動態取得
-
-                -- 找最近目標且 Glove == "5 More"
+                -- 找最近且 Glove == "5 More" 的目標
                 local target = nil
                 for _, p in ipairs(Players:GetPlayers()) do
                     if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
@@ -439,7 +449,6 @@ detectBtn.MouseButton1Click:Connect(function()
                     continue
                 end
 
-                -- 找 _More 資料夾最大數字
                 local targetName = target.Name
                 local moreFolder = Workspace:FindFirstChild(targetName .. "_More")
                 if not moreFolder then
@@ -463,19 +472,21 @@ detectBtn.MouseButton1Click:Connect(function()
                     continue
                 end
 
-                detectStatusLabel.Text = string.format("攻擊 %s (1~%d)", targetName, maxNum)
+                -- 讀取攻擊次數
+                local hitCount = tonumber(attackCountInput.Text) or 20
+                hitCount = math.clamp(math.floor(hitCount), 1, 200)
+
+                detectStatusLabel.Text = string.format("攻擊 %s (1~%d) x%d", targetName, maxNum, hitCount)
                 detectStatusLabel.TextColor3 = THEME.green
 
-                -- 對 1～maxNum 每個數字同時發動 20 次 GeneralHit
+                -- 對 1～maxNum 每個數字同時發動 hitCount 次 GeneralHit
                 local fireTasks = {}
                 for num = 1, maxNum do
                     local child = moreFolder:FindFirstChild(tostring(num))
                     if child then
                         table.insert(fireTasks, trackThread(task.spawn(function()
-                            for _ = 1, 20 do
+                            for _ = 1, hitCount do
                                 pcall(function()
-                                    -- child 是 _More 資料夾下的 Torso（或其他部位）
-                                    -- 嘗試找 Torso，找不到就用 child 本身
                                     local hitPart = child:FindFirstChild("Torso") or child
                                     ReplicatedStorage.GeneralHit:FireServer(hitPart, true)
                                 end)
@@ -485,11 +496,9 @@ detectBtn.MouseButton1Click:Connect(function()
                     end
                 end
 
-                -- 等所有攻擊 task 完成（最多等 0.3 秒）
                 task.wait(0.25)
 
-                -- 讀攻擊間隔
-                local intervalVal = tonumber(attackIntervalInput and attackIntervalInput.Text) or 0.05
+                local intervalVal = tonumber(attackIntervalInput.Text) or 0.05
                 if intervalVal < 0.01 then intervalVal = 0.01 end
                 task.wait(intervalVal)
             end
@@ -501,18 +510,7 @@ detectBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── 1-2 攻擊間隔 ─────────────────────────────────────────────
-local r12 = makeRow(p1, 2, 34)
-makeLabel(r12, "攻擊間隔(秒):", 6, 0, 96, 34)
-local attackIntervalInput = makeInput(r12, "0.05", 104, 6, 60)
-attackIntervalInput.Text = "0.05"
-makeLabel(r12, "預設 0.05", 170, 0, 80, 34, 10, THEME.textMuted)
-
--- ── 1-3 固定位置 ─────────────────────────────────────────────
-local r13 = makeRow(p1, 3, 34)
-makeLabel(r13, "固定位置:", 6, 0, 80, 34)
-local fixPosBtn1 = makeButton(r13, "啟動", 210, 5, 42, 24)
-
+-- 固定位置邏輯
 local fixPosRunning1 = false
 local fixPosThread1  = nil
 local fixPosSaved1   = nil
@@ -536,7 +534,7 @@ fixPosBtn1.MouseButton1Click:Connect(function()
         fixPosSaved1 = hrp.CFrame
         fixPosRunning1 = true
         fixPosBtn1.Text = "解除"; fixPosBtn1.BackgroundColor3 = THEME.red
-        r13.BackgroundColor3 = Color3.fromRGB(20, 8, 4)
+        r13.BackgroundColor3 = Color3.fromRGB(8, 20, 12)
         activeFeatures["固定位置(攻)"] = true; updateStatus()
         fixPosThread1 = trackThread(task.spawn(function()
             while fixPosRunning1 do
@@ -554,14 +552,44 @@ end)
 -- ============================================================
 local p2 = pages[2]
 
---[[
-  幫助者說明：
-  - 自動疊分身：非 ragdoll 且自己的 _More 數量 < 5 時，每秒 FireServer GeneralAbility
-    （分身攻擊開著時 equip tool，到5後 unequip）
-  - 分身攻擊：開著時每 0.8 秒 FireServer Events.fivemore
-  - 固定位置（幫助者版）
-  - 每隔 N 秒重置分身：FireServer SelfKnockback 一次
---]]
+-- equip / unequip 工具
+local function equipTool()
+    pcall(function()
+        local char = player.Character
+        if not char then return end
+        local backpack = player:FindFirstChildOfClass("Backpack")
+        if not backpack then return end
+        local tool = backpack:FindFirstChildOfClass("Tool")
+        if tool then
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if hum then hum:EquipTool(tool) end
+        end
+    end)
+end
+
+local function unequipTool()
+    pcall(function()
+        local char = player.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum:UnequipTools() end
+    end)
+end
+
+-- 取得自己的 _More 數量
+local function getSelfMoreCount()
+    local mf = Workspace:FindFirstChild(player.Name .. "_More")
+    if not mf then return 0 end
+    local c = 0
+    for i = 1, 5 do
+        if mf:FindFirstChild(tostring(i)) then c = i end
+    end
+    return c
+end
+
+-- 分身攻擊狀態（需在自動疊分身前宣告）
+local cloneAttackRunning = false
+local cloneAttackThread  = nil
 
 -- ── 2-1 自動疊分身 ────────────────────────────────────────────
 local r21 = makeRow(p2, 1, 34)
@@ -589,58 +617,22 @@ local function resetAutoCloneUI()
     activeFeatures["自動疊分身"] = false; updateStatus()
 end
 
--- equip / unequip 工具
-local function equipTool()
-    pcall(function()
-        local char = player.Character
-        if not char then return end
-        local backpack = player:FindFirstChildOfClass("Backpack")
-        if not backpack then return end
-        local tool = backpack:FindFirstChildOfClass("Tool")
-        if tool then
-            -- 透過 humanoid 裝備
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum:EquipTool(tool) end
-        end
-    end)
-end
-
-local function unequipTool()
-    pcall(function()
-        local char = player.Character
-        if not char then return end
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum:UnequipTools() end
-    end)
-end
-
--- 取得自己的 _More 數量
-local function getSelfMoreCount()
-    local mf = Workspace:FindFirstChild(player.Name .. "_More")
-    if not mf then return 0 end
-    local c = 0
-    for i = 1, 5 do
-        if mf:FindFirstChild(tostring(i)) then c = i end
-    end
-    return c
-end
-
 autoCloneBtn.MouseButton1Click:Connect(function()
     autoCloneRunning = not autoCloneRunning
     if autoCloneRunning then
         autoCloneBtn.Text = "停止"; autoCloneBtn.BackgroundColor3 = THEME.red
-        r21.BackgroundColor3 = Color3.fromRGB(20, 8, 4)
+        r21.BackgroundColor3 = Color3.fromRGB(8, 20, 12)
         activeFeatures["自動疊分身"] = true; updateStatus()
 
         autoCloneThread = trackThread(task.spawn(function()
             while autoCloneRunning do
+                -- 使用修正後的 ragdoll 判定
                 if not isSelfRagdoll() then
                     local moreCount = getSelfMoreCount()
                     if moreCount < 5 then
                         autoCloneStatusLabel.Text = string.format("疊分身中 (%d/5)", moreCount)
                         autoCloneStatusLabel.TextColor3 = THEME.accent
 
-                        -- 分身攻擊開著時先 equip
                         if cloneAttackRunning then
                             equipTool()
                         end
@@ -652,7 +644,6 @@ autoCloneBtn.MouseButton1Click:Connect(function()
                         autoCloneStatusLabel.Text = "已到 5 ✅"
                         autoCloneStatusLabel.TextColor3 = THEME.green
 
-                        -- 到 5 後 unequip
                         if cloneAttackRunning then
                             unequipTool()
                         end
@@ -698,7 +689,7 @@ fixPosBtn2.MouseButton1Click:Connect(function()
         fixPosSaved2 = hrp.CFrame
         fixPosRunning2 = true
         fixPosBtn2.Text = "解除"; fixPosBtn2.BackgroundColor3 = THEME.red
-        r22.BackgroundColor3 = Color3.fromRGB(20, 8, 4)
+        r22.BackgroundColor3 = Color3.fromRGB(8, 20, 12)
         activeFeatures["固定位置(助)"] = true; updateStatus()
         fixPosThread2 = trackThread(task.spawn(function()
             while fixPosRunning2 do
@@ -725,9 +716,6 @@ cloneAttackStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
 cloneAttackStatusLabel.Parent = r23
 local cloneAttackBtn = makeButton(r23, "啟動", 210, 5, 42, 24)
 
-local cloneAttackRunning = false
-local cloneAttackThread  = nil
-
 local function resetCloneAttackUI()
     cloneAttackRunning = false
     if cloneAttackThread then pcall(function() task.cancel(cloneAttackThread) end) cloneAttackThread = nil end
@@ -742,7 +730,7 @@ cloneAttackBtn.MouseButton1Click:Connect(function()
     cloneAttackRunning = not cloneAttackRunning
     if cloneAttackRunning then
         cloneAttackBtn.Text = "停止"; cloneAttackBtn.BackgroundColor3 = THEME.red
-        r23.BackgroundColor3 = Color3.fromRGB(20, 8, 4)
+        r23.BackgroundColor3 = Color3.fromRGB(8, 20, 12)
         activeFeatures["分身攻擊"] = true; updateStatus()
 
         cloneAttackThread = trackThread(task.spawn(function()
@@ -784,7 +772,7 @@ resetCloneBtn.MouseButton1Click:Connect(function()
     resetCloneRunning = not resetCloneRunning
     if resetCloneRunning then
         resetCloneBtn.Text = "停止"; resetCloneBtn.BackgroundColor3 = THEME.red
-        r24.BackgroundColor3 = Color3.fromRGB(20, 8, 4)
+        r24.BackgroundColor3 = Color3.fromRGB(8, 20, 12)
         activeFeatures["重置分身"] = true; updateStatus()
 
         resetCloneThread = trackThread(task.spawn(function()
@@ -792,7 +780,6 @@ resetCloneBtn.MouseButton1Click:Connect(function()
                 local interval = tonumber(resetIntervalInput.Text) or 5
                 if interval < 1 then interval = 1 end
 
-                -- 倒數顯示
                 local endTime = tick() + interval
                 while tick() < endTime and resetCloneRunning do
                     local rem = math.ceil(endTime - tick())
@@ -802,7 +789,6 @@ resetCloneBtn.MouseButton1Click:Connect(function()
 
                 if not resetCloneRunning then break end
 
-                -- 觸發重置
                 pcall(function()
                     ReplicatedStorage.SelfKnockback:FireServer({
                         Direction = Vector3.new(0, 0.01, 0),
@@ -834,11 +820,13 @@ local EXPLAIN_TEXT =
     "鏟子、月亮、公車、rob、憤怒、跑酷、加速器、雲、棍子、工程師、積木、蟲洞、木板、閃光、冰砂\n\n" ..
     "【通用攻擊 - 偵測+攻擊】\n" ..
     "自動找最近且 leaderstat Glove 為「5 More」的玩家，偵測其 workspace 的 _More 資料夾，" ..
-    "對其中每個數字編號（1～最大值）的子物件同時發動 20 次 GeneralHit。\n\n" ..
+    "對其中每個數字編號（1～最大值）的子物件同時發動設定次數的 GeneralHit。\n\n" ..
+    "【通用攻擊 - 攻擊次數】\n" ..
+    "每個目標編號要打幾下，預設 20，可自行調整。\n\n" ..
     "【通用攻擊 - 攻擊間隔】\n" ..
     "每輪攻擊完後等待的秒數，預設 0.05 秒。\n\n" ..
     "【幫助者 - 自動疊分身】\n" ..
-    "非 ragdoll 且自己的 _More 數量未到 5 時，每秒自動發動 GeneralAbility。" ..
+    "非 ragdoll（真正倒地或血量為 0）且自己的 _More 數量未到 5 時，每秒自動發動 GeneralAbility。" ..
     "若分身攻擊同時開啟，發動能力時會自動 equip 工具，到 5 後自動 unequip。\n\n" ..
     "【幫助者 - 分身攻擊】\n" ..
     "開啟後每 0.8 秒發動一次 Events.fivemore。\n\n" ..
@@ -948,4 +936,4 @@ closeBtn.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的 5 More 精通刷取腳本已載入！")
+print("貓玲的 5 More 精通刷取腳本 v2.0 已載入！")
