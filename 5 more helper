@@ -53,22 +53,25 @@ local function getGloveStat(p)
     return g.Value
 end
 
--- 修正版 ragdoll 判定：只用 Humanoid 狀態，不靠物件名
+-- ragdoll 判定：同時檢查多種實作方式
 local function isSelfRagdoll()
     local char = player.Character
     if not char then return true end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum then return true end
+    -- 血量為 0
+    if hum.Health <= 0 then return true end
+    -- Humanoid 狀態倒地
     local state = hum:GetState()
-    -- 只有 FallingDown（真正倒地）才算 ragdoll
-    -- Physics / GettingUp 等皆視為正常
-    if state == Enum.HumanoidStateType.FallingDown then
+    if state == Enum.HumanoidStateType.FallingDown
+    or state == Enum.HumanoidStateType.Ragdoll then
         return true
     end
-    -- 血量為 0 也算無效狀態
-    if hum.Health <= 0 then
-        return true
-    end
+    -- 角色裡有 Ragdoll 物件（BoolValue/StringValue/Folder 都算）
+    if char:FindFirstChild("Ragdoll") then return true end
+    -- HumanoidRootPart 被 Anchor（凍結）
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if hrp and hrp.Anchored then return true end
     return false
 end
 
@@ -375,6 +378,39 @@ end
 -- ============================================================
 local p1 = pages[1]
 
+-- ============================================================
+-- __namecall hook：只負責偵測和存資料，不在 hook 裡呼叫 FireServer
+-- ============================================================
+local onMoreFired = nil  -- hook 偵測到時設為 {remote, args, displayName}
+
+local _nc
+_nc = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+    local method = getnamecallmethod()
+    local results = table.pack(_nc(self, ...))
+
+    if method == "FireServer" and onMoreFired == false then
+        -- onMoreFired == false 代表偵測開啟中、等待第一個事件
+        local ok, cls = pcall(function() return self.ClassName end)
+        if ok and cls == "RemoteEvent" then
+            local args = { ... }
+            local displayName = self.Name
+            for _, v in ipairs(args) do
+                if typeof(v) == "Instance" then
+                    local ok2, fullName = pcall(function() return v:GetFullName() end)
+                    if ok2 and fullName:find("_More") then
+                        displayName = fullName
+                        -- ★ 只存資料，不碰 FireServer，讓 Heartbeat 主執行緒去打
+                        onMoreFired = {remote = self, args = args, displayName = displayName}
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    return table.unpack(results, 1, results.n)
+end))
+
 -- ── 1-1 偵測+攻擊 ─────────────────────────────────────────────
 local r11 = makeRow(p1, 1, 56)
 makeLabel(r11, "偵測+攻擊:", 6, 0, 80, 34)
@@ -408,13 +444,11 @@ local r13 = makeRow(p1, 4, 34)
 makeLabel(r13, "固定位置:", 6, 0, 80, 34)
 local fixPosBtn1 = makeButton(r13, "啟動", 210, 5, 42, 24)
 
--- 偵測+攻擊邏輯（放在輸入框定義之後）
 local detectRunning = false
-local detectThread  = nil
 
 local function resetDetectUI()
     detectRunning = false
-    if detectThread then pcall(function() task.cancel(detectThread) end) detectThread = nil end
+    onMoreFired   = nil   -- nil = 偵測關閉
     detectBtn.Text = "啟動"; detectBtn.BackgroundColor3 = THEME.primary
     r11.BackgroundColor3 = THEME.bgRow
     detectStatusLabel.Text = "未啟動"; detectStatusLabel.TextColor3 = THEME.textMuted
@@ -426,88 +460,111 @@ detectBtn.MouseButton1Click:Connect(function()
     if detectRunning then
         detectBtn.Text = "停止"; detectBtn.BackgroundColor3 = THEME.red
         r11.BackgroundColor3 = Color3.fromRGB(8, 20, 12)
+        detectStatusLabel.Text = "等待事件中…"; detectStatusLabel.TextColor3 = THEME.accent
         activeFeatures["偵測攻擊"] = true; updateStatus()
+        onMoreFired = false  -- false = 偵測開啟、等待中
+    else
+        resetDetectUI()
+    end
+end)
 
-        detectThread = trackThread(task.spawn(function()
-            while detectRunning do
-                -- 找最近且 Glove == "5 More" 的目標
-                local target = nil
-                for _, p in ipairs(Players:GetPlayers()) do
-                    if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                        local gv = getGloveStat(p)
-                        if gv == "5 More" then
-                            target = p
+-- ★ Heartbeat 主執行緒：負責實際發送 FireServer
+RunService.Heartbeat:Connect(function()
+    if type(onMoreFired) ~= "table" then return end
+    local data = onMoreFired
+    onMoreFired = false  -- 立刻重設，避免重入
+
+    if not detectRunning then return end
+
+    local remote      = data.remote
+    local args        = data.args
+    local displayName = data.displayName
+    local hitCount    = tonumber(attackCountInput.Text) or 20
+    hitCount = math.clamp(math.floor(hitCount), 1, 200)
+    local intervalVal = tonumber(attackIntervalInput.Text) or 0.05
+    if intervalVal < 0.004 then intervalVal = 0.004 end
+
+    -- 從攔截到的路徑找 _More 資料夾，取最大數字
+    -- displayName 例如 "Workspace.玩家名_More.3.Torso"
+    -- 從 args 裡找到那個 Instance，往上兩層就是 _More 資料夾
+    local moreFolder = nil
+    for _, v in ipairs(args) do
+        if typeof(v) == "Instance" then
+            -- v 是 Torso/Head 等，parent 是數字資料夾，parent.parent 是 _More
+            local ok, p = pcall(function() return v.Parent and v.Parent.Parent end)
+            if ok and p and p.Name:find("_More") then
+                moreFolder = p
+                break
+            end
+            -- 有時候 v 本身就是數字資料夾
+            local ok2, pname = pcall(function() return v.Parent and v.Parent.Name end)
+            if ok2 and pname and pname:find("_More") then
+                moreFolder = v.Parent
+                break
+            end
+        end
+    end
+
+    -- 找最大數字
+    local maxNum = 0
+    if moreFolder then
+        for i = 1, 5 do
+            if moreFolder:FindFirstChild(tostring(i)) then maxNum = i end
+        end
+    end
+
+    if maxNum == 0 then
+        -- 找不到資料夾就退回只打攔截到的那個
+        maxNum = 1
+        detectStatusLabel.Text = string.format("攔截！%s x%d", displayName:sub(-30), hitCount)
+    else
+        detectStatusLabel.Text = string.format("攔截！1~%d x%d", maxNum, hitCount)
+    end
+    detectStatusLabel.TextColor3 = THEME.green
+
+    -- 主執行緒裡對 1～maxNum 每個都打 hitCount 次
+    task.spawn(function()
+        for num = 1, maxNum do
+            local targetPart = nil
+            if moreFolder then
+                local numFolder = moreFolder:FindFirstChild(tostring(num))
+                if numFolder then
+                    -- 用和攔截到的同類部位（Torso/Head 等）
+                    for _, v in ipairs(args) do
+                        if typeof(v) == "Instance" then
+                            local partName = v.Name
+                            targetPart = numFolder:FindFirstChild(partName) or numFolder:FindFirstChildOfClass("BasePart") or numFolder
                             break
                         end
                     end
                 end
-
-                if not target then
-                    detectStatusLabel.Text = "找不到 5 More 目標…"
-                    detectStatusLabel.TextColor3 = THEME.red
-                    task.wait(1)
-                    continue
-                end
-
-                local targetName = target.Name
-                local moreFolder = Workspace:FindFirstChild(targetName .. "_More")
-                if not moreFolder then
-                    detectStatusLabel.Text = targetName .. " 無 _More 資料夾"
-                    detectStatusLabel.TextColor3 = THEME.red
-                    task.wait(0.5)
-                    continue
-                end
-
-                local maxNum = 0
-                for i = 1, 5 do
-                    if moreFolder:FindFirstChild(tostring(i)) then
-                        maxNum = i
-                    end
-                end
-
-                if maxNum == 0 then
-                    detectStatusLabel.Text = targetName .. "_More 內無子物件"
-                    detectStatusLabel.TextColor3 = THEME.red
-                    task.wait(0.5)
-                    continue
-                end
-
-                -- 讀取攻擊次數
-                local hitCount = tonumber(attackCountInput.Text) or 20
-                hitCount = math.clamp(math.floor(hitCount), 1, 200)
-
-                detectStatusLabel.Text = string.format("攻擊 %s (1~%d) x%d", targetName, maxNum, hitCount)
-                detectStatusLabel.TextColor3 = THEME.green
-
-                -- 對 1～maxNum 每個數字同時發動 hitCount 次 GeneralHit
-                local fireTasks = {}
-                for num = 1, maxNum do
-                    local child = moreFolder:FindFirstChild(tostring(num))
-                    if child then
-                        table.insert(fireTasks, trackThread(task.spawn(function()
-                            for _ = 1, hitCount do
-                                pcall(function()
-                                    local hitPart = child:FindFirstChild("Torso") or child
-                                    ReplicatedStorage.GeneralHit:FireServer(hitPart, true)
-                                end)
-                                task.wait(0.01)
-                            end
-                        end)))
-                    end
-                end
-
-                task.wait(0.25)
-
-                local intervalVal = tonumber(attackIntervalInput.Text) or 0.05
-                if intervalVal < 0.01 then intervalVal = 0.01 end
-                task.wait(intervalVal)
             end
 
-            resetDetectUI()
-        end))
-    else
-        resetDetectUI()
-    end
+            if targetPart then
+                -- 把 args 裡的 Instance 換成對應編號的部位
+                local newArgs = {}
+                local replaced = false
+                for _, v in ipairs(args) do
+                    if typeof(v) == "Instance" and not replaced then
+                        table.insert(newArgs, targetPart)
+                        replaced = true
+                    else
+                        table.insert(newArgs, v)
+                    end
+                end
+                for i = 1, hitCount do
+                    if not detectRunning then break end
+                    pcall(function() remote:FireServer(table.unpack(newArgs)) end)
+                    if i < hitCount then task.wait(intervalVal) end
+                end
+            end
+        end
+
+        if detectRunning then
+            detectStatusLabel.Text = "等待事件中…"
+            detectStatusLabel.TextColor3 = THEME.accent
+        end
+    end)
 end)
 
 -- 固定位置邏輯
@@ -819,12 +876,14 @@ local EXPLAIN_TEXT =
     "照貓玲在網上找的，能用 5 More 刷的手套有：\n" ..
     "鏟子、月亮、公車、rob、憤怒、跑酷、加速器、雲、棍子、工程師、積木、蟲洞、木板、閃光、冰砂\n\n" ..
     "【通用攻擊 - 偵測+攻擊】\n" ..
-    "自動找最近且 leaderstat Glove 為「5 More」的玩家，偵測其 workspace 的 _More 資料夾，" ..
-    "對其中每個數字編號（1～最大值）的子物件同時發動設定次數的 GeneralHit。\n\n" ..
+    "開啟後進入等待模式，透過 __namecall hook 被動監聽所有 FireServer。\n" ..
+    "只要遊戲本身觸發任何參數路徑含「_More[數字]」的 RemoteEvent，就自動攔截，\n" ..
+    "並用完全相同的 RemoteEvent 與參數重複發送 N 次。\n" ..
+    "不限定是哪個 Remote，任何手套只要走這個路徑都能攔到。\n\n" ..
     "【通用攻擊 - 攻擊次數】\n" ..
-    "每個目標編號要打幾下，預設 20，可自行調整。\n\n" ..
+    "攔截到事件後要重複發送幾次，預設 20，上限 200。\n\n" ..
     "【通用攻擊 - 攻擊間隔】\n" ..
-    "每輪攻擊完後等待的秒數，預設 0.05 秒。\n\n" ..
+    "每次重複發送之間等待的秒數，預設 0.05 秒。\n\n" ..
     "【幫助者 - 自動疊分身】\n" ..
     "非 ragdoll（真正倒地或血量為 0）且自己的 _More 數量未到 5 時，每秒自動發動 GeneralAbility。" ..
     "若分身攻擊同時開啟，發動能力時會自動 equip 工具，到 5 後自動 unequip。\n\n" ..
