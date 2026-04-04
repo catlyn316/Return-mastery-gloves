@@ -1,4 +1,4 @@
--- 貓玲的薩諾斯、耀西精通腳本 v1.5
+-- 貓玲的薩諾斯、耀西精通腳本 v1.6
 -- 分區：薩諾斯 / 耀西 / 其他 / 說明
 
 local CoreGui           = game:GetService("CoreGui")
@@ -7,6 +7,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService  = game:GetService("UserInputService")
 local Workspace         = game:GetService("Workspace")
 local RunService        = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -153,27 +154,31 @@ local function getNearestPlayer()
     return nearest
 end
 
--- 偵測 200 單位內是否有 egg_victim，可選是否只偵測 target == 自己的
+-- 偵測 egg_victim，可選是否只偵測 target == 自己的（距離不限）
 local function getNearestEggVictim(maxDist, selfOnly)
     local char = player.Character
     local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
     maxDist = maxDist or math.huge
     local myName = player.Name
     local nearest, minDist = nil, math.huge
+
+    -- 若 selfOnly 且無 hrp，仍可掃 workspace（距離不限，不需座標）
     for _, obj in ipairs(Workspace:GetChildren()) do
         if obj.Name:lower():find("egg_victim") or obj.Name:lower():find("eggvictim") then
-            -- selfOnly：只回傳 target == 自己的
             if selfOnly then
                 local targetAttr = obj:GetAttribute("target")
                 if targetAttr ~= myName then continue end
-            end
-            local objHRP = obj:FindFirstChild("HumanoidRootPart")
-                        or obj:FindFirstChild("Torso")
-                        or obj.PrimaryPart
-            if objHRP then
-                local d = (objHRP.Position - hrp.Position).Magnitude
-                if d <= maxDist and d < minDist then minDist = d; nearest = obj end
+                -- selfOnly 模式：不需距離計算，直接回傳第一個符合的
+                return obj
+            else
+                if not hrp then continue end
+                local objHRP = obj:FindFirstChild("HumanoidRootPart")
+                            or obj:FindFirstChild("Torso")
+                            or obj.PrimaryPart
+                if objHRP then
+                    local d = (objHRP.Position - hrp.Position).Magnitude
+                    if d <= maxDist and d < minDist then minDist = d; nearest = obj end
+                end
             end
         end
     end
@@ -254,7 +259,14 @@ local function teleportToLobby()
     return false
 end
 
+-- ★ 修正：優先對 Humanoid 設 Health=0，fallback 才用 FireServer
 local function doSelfKill()
+    local char = player.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health > 0 then
+        hum.Health = 0
+        return
+    end
     pcall(function() Players[player.Name].Reset:FireServer() end)
 end
 
@@ -270,6 +282,19 @@ local function waitForRespawn(timeout)
         task.wait(0.15)
     end
     task.wait(0.3)
+end
+
+-- ★ 模擬點擊螢幕中央（VirtualInputManager）
+local function tapScreenCenter()
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    local cx, cy = vp.X / 2, vp.Y / 2
+    pcall(function()
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true,  game, 0)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 0)
+    end)
 end
 
 -- ============================================================
@@ -553,8 +578,7 @@ local function trackThread(t) table.insert(allThreads, t); return t end
 local fixPosRunning = false
 local fixPosThread  = nil
 local fixPosSaved   = nil
--- forward declaration
-local fixPosBtn
+local fixPosBtn  -- forward declaration
 
 local function stopFixPos()
     fixPosRunning = false
@@ -646,7 +670,6 @@ thanosAtkBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ── 薩諾斯 自動使用能力 ──────────────────────────────────────
--- 能力1 → 等2秒 → 能力2 → 等4秒 → 循環
 local rT2 = makeRow(p1, 2, 56)
 makeLabel(rT2, "自動使用能力:", 6, 2, 100, 20, 11, THEME.textSub, nil, "sub")
 local thanosAbilStatusLabel = makeStatusLabel(rT2, 6, 36, 210)
@@ -787,6 +810,7 @@ yoshiTask23Btn.MouseButton1Click:Connect(function()
 end)
 
 -- ── 耀西 第一、四任務 ──────────────────────────────────────
+-- ★ 新增：使用能力後 0.3s 自動點擊螢幕中央
 local rY2 = makeRow(p2, 2, 56)
 makeLabel(rY2, "第一、四任務:", 6, 2, 100, 20, 11, THEME.textSub, nil, "sub")
 local yoshiTask14StatusLabel = makeStatusLabel(rY2, 6, 34, 200)
@@ -831,6 +855,14 @@ yoshiTask14Btn.MouseButton1Click:Connect(function()
                             yoshiTask14StatusLabel.Text = "偵測到目標！發動能力"
                             yoshiTask14StatusLabel.TextColor3 = THEME.green
                             pcall(function() ReplicatedStorage.GeneralAbility:FireServer() end)
+                            -- ★ 能力後 0.3s 自動點擊螢幕中央
+                            task.delay(0.3, function()
+                                if yoshiTask14Running then
+                                    tapScreenCenter()
+                                    yoshiTask14StatusLabel.Text = "點擊螢幕中央完成"
+                                    yoshiTask14StatusLabel.TextColor3 = THEME.accent
+                                end
+                            end)
                         else
                             local remain = math.ceil(3 - (tick() - yoshiTask14LastFire))
                             yoshiTask14StatusLabel.Text = string.format("冷卻中 (%ds)", remain)
@@ -873,14 +905,12 @@ fixPosBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── 3-2 幫助者（會重置 / 不重置）───────────────────────────
--- 列高 130：標題+模式 / 名稱輸入 / 距離+模式切換 / 狀態1 / 狀態2
+-- ── 3-2 幫助者 ─────────────────────────────────────────────
+-- 列高 130
 local r32 = makeRow(p3, 2, 130)
 
--- 標題
 makeLabel(r32, "幫助者:", 6, 4, 54, 18, 11, THEME.textSub, nil, "sub")
 
--- 重置模式切換
 local helpModeReset = Instance.new("TextButton")
 helpModeReset.Size = UDim2.new(0, 52, 0, 18)
 helpModeReset.Position = UDim2.new(0, 62, 0, 4)
@@ -901,27 +931,22 @@ helpModeNoReset.TextColor3 = THEME.textMuted
 helpModeNoReset.Parent = r32
 Instance.new("UICorner", helpModeNoReset).CornerRadius = UDim.new(0, 4)
 
--- 玩家名輸入
 makeLabel(r32, "玩家名:", 6, 28, 50, 18, 10, THEME.textMuted, nil, "muted")
 local unifiedHelpInput = makeInput(r32, "玩家名", 56, 28, 130, 20)
 
--- 距離輸入
 makeLabel(r32, "距離:", 6, 52, 40, 18, 10, THEME.textMuted, nil, "muted")
 local unifiedHelpDistInput = makeInput(r32, "5", 46, 52, 32, 20)
 unifiedHelpDistInput.Text = "5"
 makeLabel(r32, "格", 82, 52, 16, 18, 10, THEME.textMuted, nil, "muted")
 
--- 啟動按鈕
 local unifiedHelpBtn = makeButton(r32, "啟動", 104, 50, 44, 22)
 
--- 狀態（三行）
 local unifiedHelpStatus  = makeStatusLabel(r32, 6, 78, 248)
 local unifiedHelpStatus2 = makeStatusLabel(r32, 6, 94, 248)
 local unifiedHelpStatus3 = makeStatusLabel(r32, 6, 110, 248)
 unifiedHelpStatus2.Text = ""; unifiedHelpStatus3.Text = ""
 
--- 重置模式切換邏輯（預設：會重置）
-local helpResetMode = true  -- true = 會重置, false = 不重置
+local helpResetMode = true
 helpModeReset.MouseButton1Click:Connect(function()
     helpResetMode = true
     helpModeReset.BackgroundColor3 = THEME.tabActive
@@ -948,7 +973,6 @@ local function resetUnifiedHelp()
     unifiedHelpStatus.Text  = "未啟動"; unifiedHelpStatus.TextColor3  = THEME.textMuted
     unifiedHelpStatus2.Text = "";       unifiedHelpStatus2.TextColor3 = THEME.textMuted
     unifiedHelpStatus3.Text = "";       unifiedHelpStatus3.TextColor3 = THEME.textMuted
-    -- 幫助者停止時也取消固定位置
     stopFixPos(); r31.BackgroundColor3 = THEME.bgRow
     activeFeatures["幫助者"] = false; updateStatus()
 end
@@ -970,12 +994,29 @@ unifiedHelpBtn.MouseButton1Click:Connect(function()
 
         unifiedHelpThread = trackThread(task.spawn(function()
 
-            -- 傳送到 Lobby.Teleport1 → 傳送到目標前方 → 開固定位置
+            -- ★ 等待角色載入後若 1 秒內無 tool 就傳送到 Teleport1
+            local function waitRespawnThenTeleportIfNoTool()
+                waitForRespawn(12)
+                -- 等最多 1 秒，看有沒有 tool 出現
+                local toolFound = false
+                local deadline  = tick() + 1
+                while tick() < deadline do
+                    if hasTool() then toolFound = true; break end
+                    task.wait(0.1)
+                end
+                if not toolFound then
+                    unifiedHelpStatus2.Text = "載入後無工具 → 傳送 Teleport1"
+                    unifiedHelpStatus2.TextColor3 = THEME.accent
+                    teleportToLobby()
+                    task.wait(0.3)
+                end
+            end
+
+            -- 傳送到 Lobby.Teleport1 → 等載入（+工具偵測）→ 傳到目標前方 → 開固定位置
             local function teleportToLobbyThenTargetAndFix()
-                -- 先取消固定位置（避免傳送被鎖死）
                 stopFixPos(); r31.BackgroundColor3 = THEME.bgRow
                 teleportToLobby()
-                waitForRespawn(10)
+                waitRespawnThenTeleportIfNoTool()
                 local tgt2 = findPlayerByPartialName(unifiedHelpInput.Text)
                 if tgt2 and tgt2.Character then
                     local tHRP = tgt2.Character:FindFirstChild("HumanoidRootPart")
@@ -986,7 +1027,6 @@ unifiedHelpBtn.MouseButton1Click:Connect(function()
                         local targetCF = tHRP.CFrame * CFrame.new(0, 0, -dist)
                         pcall(function() myH.CFrame = targetCF end)
                         task.wait(0.05)
-                        -- 重新取得 HRP（傳送後可能更新）
                         local myC2 = player.Character
                         local myH2 = myC2 and myC2:FindFirstChild("HumanoidRootPart")
                         if myH2 then
@@ -997,7 +1037,7 @@ unifiedHelpBtn.MouseButton1Click:Connect(function()
                 end
             end
 
-            -- 僅傳送到目標前方 → 開固定位置（不需要先去 Teleport1）
+            -- 僅傳送到目標前方 → 開固定位置（初始使用）
             local function teleportToTargetAndFix()
                 stopFixPos(); r31.BackgroundColor3 = THEME.bgRow
                 local tgt2 = findPlayerByPartialName(unifiedHelpInput.Text)
@@ -1035,7 +1075,6 @@ unifiedHelpBtn.MouseButton1Click:Connect(function()
                 local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
                 if not myHRP then task.wait(0.2); continue end
 
-                -- 狀態顯示
                 unifiedHelpStatus3.Text = helpResetMode and "模式：會重置" or "模式：不重置"
                 unifiedHelpStatus3.TextColor3 = helpResetMode and THEME.green or THEME.textMuted
 
@@ -1046,35 +1085,31 @@ unifiedHelpBtn.MouseButton1Click:Connect(function()
                         unifiedHelpStatus2.Text = "🥚 egg_victim 靠近 → 血量歸0 → 重生 → 傳送"
                         unifiedHelpStatus2.TextColor3 = THEME.green
                         doSelfKill()
-                        waitForRespawn(12)
                         teleportToLobbyThenTargetAndFix()
                         unifiedHelpStatus2.Text = ""
                         continue
                     end
 
                     -- ══ 條件 2：egg_victim 的 target == 自己用戶名（距離不限）══
+                    -- ★ 移除了舊的條件 3（hasTool 偵測），改為只保留條件 2
                     local victimSelf = getNearestEggVictim(math.huge, true)
                     if victimSelf then
                         unifiedHelpStatus2.Text = "🎯 egg_victim target=自己 → 血量歸0 → 重生 → 傳送"
                         unifiedHelpStatus2.TextColor3 = THEME.accent
                         doSelfKill()
-                        waitForRespawn(12)
                         teleportToLobbyThenTargetAndFix()
                         unifiedHelpStatus2.Text = ""
                         continue
                     end
 
-                    -- ══ 條件 3：0.5s 內無工具（egg 不在 200 單位時才觸發）══
-                    local noToolCount = 0
-                    local toolCheckStart = tick()
-                    while tick() - toolCheckStart < 0.5 do
-                        if not hasTool() then noToolCount = noToolCount + 1 end
-                        task.wait(0.1)
-                    end
-                    -- 再次確認 egg（防止在 tool 偵測期間剛進入範圍）
+                    -- ══ 條件 3：★ 改為 自己角色死亡/消失（不與被蛋衝突）══
+                    -- 注意：被蛋時 character 仍存在（蛋模型），只有 Humanoid 消失或 Health=0
+                    local myHum = myChar and myChar:FindFirstChildOfClass("Humanoid")
+                    local isSelfDead = (myHum == nil) or (myHum.Health <= 0) or isRagdoll(myChar)
+                    -- 再次確認無 egg victim 在 200 單位（避免與條件1重複）
                     local victimCheck = getNearestEggVictim(200, false)
-                    if noToolCount >= 4 and not victimCheck then
-                        unifiedHelpStatus2.Text = "⚡ 無工具 → 傳送到 Teleport1 → 目標"
+                    if isSelfDead and not victimCheck then
+                        unifiedHelpStatus2.Text = "⚡ 角色死亡 → Teleport1 → 目標"
                         unifiedHelpStatus2.TextColor3 = THEME.accent
                         teleportToLobbyThenTargetAndFix()
                         task.wait(0.3)
@@ -1082,8 +1117,7 @@ unifiedHelpBtn.MouseButton1Click:Connect(function()
                         continue
                     end
                 else
-                    -- 不重置模式：跳過所有條件，只維持固定位置
-                    -- 若固定位置不知何故停了就重新啟動
+                    -- 不重置模式：只維持固定位置
                     if not fixPosRunning then
                         teleportToTargetAndFix()
                     end
@@ -1276,8 +1310,9 @@ local EXPLAIN_TEXT =
     "  不需另開自動攻擊\n\n" ..
     "▸ 解第一、四任務：\n" ..
     "  開「第一、四任務」\n" ..
+    "  使用能力後 0.3s 會自動點擊螢幕中央\n" ..
     "  幫助者被變成蛋後是否要重生由幫助者自行選擇\n" ..
-    "  → 選「會重置」：被蛋後自動重生並回到位置\n" ..
+    "  → 選「會重置」：被蛋後自動血量歸0重生並回到位置\n" ..
     "  → 選「不重置」：被蛋後原地不動繼續站著\n\n" ..
 
     "═══ 功能說明 ═══\n\n" ..
@@ -1293,7 +1328,8 @@ local EXPLAIN_TEXT =
     "→ 等 0.3s → GeneralHit → 等 2s → 循環。\n\n" ..
 
     "【耀西 - 第一、四任務】\n" ..
-    "偵測正前方 10 單位有玩家時發動 GeneralAbility()，冷卻 3s。\n\n" ..
+    "偵測正前方 10 單位有玩家時發動 GeneralAbility()，冷卻 3s。\n" ..
+    "發動後 0.3s 自動點擊螢幕中央。\n\n" ..
 
     "【其他 - 固定位置】\n" ..
     "記錄當前位置並持續鎖定 HumanoidRootPart CFrame。\n" ..
@@ -1301,10 +1337,11 @@ local EXPLAIN_TEXT =
 
     "【其他 - 幫助者】\n" ..
     "傳送到目標前方指定距離並開啟固定位置。\n\n" ..
-    "「會重置」模式觸發條件（三者均執行：血量歸0 → 等載入 → Lobby.Teleport1 → 傳到目標 → 固定）：\n" ..
+    "「會重置」模式觸發條件（執行：血量歸0 → 等載入 → 若1秒無工具再傳Teleport1 → 傳到目標 → 固定）：\n" ..
     "① 任意 egg_victim 在 200 單位內\n" ..
     "② 任意 egg_victim 的 target 屬性 == 自己用戶名（距離不限）\n" ..
-    "③ 0.5s 內工具欄無任何 Tool（egg 不在 200 單位時才觸發）\n\n" ..
+    "③ 自己角色 Humanoid 消失或 Health=0（死亡偵測，不依賴工具欄）\n\n" ..
+    "★ 載入角色後若 1 秒內沒有任何 Tool，自動再傳送到 Teleport1。\n\n" ..
     "「不重置」模式：不論任何條件，只維持固定位置，不執行任何重置。\n\n" ..
 
     "【其他 - 自動攻擊】\n" ..
@@ -1355,7 +1392,6 @@ local function switchTab(n)
         tb.BackgroundColor3 = (i == n) and THEME.tabActive or THEME.tabBg
         tb.TextColor3       = (i == n) and THEME.textMain  or THEME.textMuted
     end
-    -- 同步固定位置按鈕顏色
     if fixPosRunning then
         r31.BackgroundColor3 = THEME.activeRow
     end
@@ -1435,4 +1471,4 @@ closeBtn.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的薩諾斯、耀西精通腳本 v1.5 已載入！")
+print("貓玲的薩諾斯、耀西精通腳本 v1.6 已載入！")
