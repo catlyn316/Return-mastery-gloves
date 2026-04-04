@@ -1,4 +1,4 @@
--- 貓玲的薩諾斯、耀西精通腳本 v1.1
+-- 貓玲的薩諾斯、耀西精通腳本 v1.2
 -- 分區：薩諾斯 / 耀西 / 其他 / 說明
 
 local CoreGui           = game:GetService("CoreGui")
@@ -101,15 +101,12 @@ local THEMES = {
 
 local THEME = THEMES.thanos
 
--- 追蹤所有應跟主題色走的按鈕（不含固定顏色的按鈕）
--- 每筆：{ btn = TextButton, isActive = bool }
 local themedButtons = {}
 
 local function registerThemedButton(btn)
     table.insert(themedButtons, { btn = btn, isActive = false })
 end
 
--- 設定按鈕啟動/未啟動狀態，同時更新 themedButtons 裡的 isActive
 local function setThemedBtnActive(btn, active)
     for _, entry in ipairs(themedButtons) do
         if entry.btn == btn then
@@ -199,6 +196,26 @@ local function waitNotRagdoll(getCharFn, timeout)
     while isRagdoll(getCharFn()) do
         if tick() - t0 > timeout then break end
         task.wait(0.1)
+    end
+end
+
+-- 等目標不處於 ragdoll 持續 stableSecs 秒
+local function waitStableNotRagdoll(getCharFn, stableSecs, timeout)
+    stableSecs = stableSecs or 0.8
+    timeout    = timeout    or 15
+    local total = tick()
+    while true do
+        if tick() - total > timeout then return end
+        -- 先等完全不是 ragdoll
+        waitNotRagdoll(getCharFn, timeout - (tick() - total))
+        -- 確認穩定 stableSecs 秒
+        local stableStart = tick()
+        local stable = true
+        while tick() - stableStart < stableSecs do
+            if isRagdoll(getCharFn()) then stable = false; break end
+            task.wait(0.05)
+        end
+        if stable then return end
     end
 end
 
@@ -363,7 +380,7 @@ statusLabel.Parent = mainFrame
 Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
 
 -- ============================================================
--- 主題套用（含更新所有追蹤中的按鈕）
+-- 主題套用
 -- ============================================================
 local function applyTheme(t)
     THEME = t
@@ -379,7 +396,6 @@ local function applyTheme(t)
     for _, page in ipairs(pages) do
         page.ScrollBarImageColor3 = THEME.primary
     end
-    -- 未啟動的按鈕換主題色；已啟動（紅色）的不動
     for _, entry in ipairs(themedButtons) do
         if not entry.isActive then
             entry.btn.BackgroundColor3 = THEME.primary
@@ -413,7 +429,6 @@ local function makeLabel(parent, text, xOff, yOff, w, h, size, color, align)
     return l
 end
 
--- 自動加入主題色追蹤（未傳 color 時）
 local function makeButton(parent, text, x, y, w, h, color)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(0, w, 0, h or 24)
@@ -474,10 +489,10 @@ local allThreads = {}
 local function trackThread(t) table.insert(allThreads, t); return t end
 
 -- ============================================================
--- 幫助者共用函式
--- 傳送到攻擊者正前方 dist 單位，egg_victim ≤ 30 單位才重置
+-- 合併幫助者（供其他區使用）
+-- 玩家名輸入框 + 距離 + 薩/耀模式選擇
 -- ============================================================
-local function makeHelpRunner(featureKey, statusLbl, rowFrame, btn, getDistFn, getTargetInputFn)
+local function makeUnifiedHelpRunner(featureKey, statusLbl, rowFrame, btn, getDistFn, getTargetInputFn, getModeInputFn)
     local running = false
     local thread  = nil
 
@@ -493,7 +508,6 @@ local function makeHelpRunner(featureKey, statusLbl, rowFrame, btn, getDistFn, g
     btn.MouseButton1Click:Connect(function()
         running = not running
         if running then
-            -- 先驗證玩家名
             local tgt, err = getTargetInputFn()
             if not tgt then
                 statusLbl.Text = err or "找不到目標"
@@ -508,7 +522,6 @@ local function makeHelpRunner(featureKey, statusLbl, rowFrame, btn, getDistFn, g
 
             thread = trackThread(task.spawn(function()
                 while running do
-                    -- 每次重新查找（防目標離線）
                     local tgtPlayer = getTargetInputFn()
                     if not tgtPlayer then
                         statusLbl.Text = "找不到目標，等待…"
@@ -525,14 +538,12 @@ local function makeHelpRunner(featureKey, statusLbl, rowFrame, btn, getDistFn, g
 
                     if tgtHRP then
                         local dist = getDistFn()
-                        -- 傳送到目標正前方 dist 單位（目標 LookVector 方向的前方）
                         local frontCFrame = tgtHRP.CFrame * CFrame.new(0, 0, -dist)
                         pcall(function() myHRP.CFrame = frontCFrame end)
                         statusLbl.Text = string.format("在 %s 前方 %d 格", tgtPlayer.Name, dist)
                         statusLbl.TextColor3 = THEME.accent
                     end
 
-                    -- 偵測 egg_victim ≤ 30 單位，才重置
                     local victim = getNearestEggVictim(30)
                     if victim then
                         statusLbl.Text = "偵測到 egg_victim，重置"
@@ -603,22 +614,32 @@ thanosTask13Btn.MouseButton1Click:Connect(function()
                 thanosTask13StatusLabel.Text = "攻擊: " .. target.Name
                 thanosTask13StatusLabel.TextColor3 = THEME.accent
 
+                -- 第一次 GeneralHit
                 pcall(function()
                     ReplicatedStorage.GeneralHit:FireServer(
                         Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso") or torso
                     )
                 end)
+                -- GeneralAbility(1)
                 pcall(function() ReplicatedStorage.GeneralAbility:FireServer(1) end)
                 task.wait(0.5)
+                -- GeneralAbility(2)
                 pcall(function() ReplicatedStorage.GeneralAbility:FireServer(2) end)
 
-                thanosTask13StatusLabel.Text = "等待 " .. target.Name .. " 起身"
+                -- ★ 等 2 秒，且目標不 ragdoll 穩定 0.8 秒後再繼續
+                thanosTask13StatusLabel.Text = "等待 2 秒冷卻…"
                 thanosTask13StatusLabel.TextColor3 = THEME.textMuted
-                waitNotRagdoll(function()
-                    return Players:FindFirstChild(target.Name) and Players[target.Name].Character
-                end)
+                task.wait(2)
                 if not thanosTask13Running then break end
 
+                thanosTask13StatusLabel.Text = "等待 " .. target.Name .. " 起身穩定 0.8s…"
+                thanosTask13StatusLabel.TextColor3 = THEME.textMuted
+                waitStableNotRagdoll(function()
+                    return Players:FindFirstChild(target.Name) and Players[target.Name].Character
+                end, 0.8, 12)
+                if not thanosTask13Running then break end
+
+                -- 重新抓 character（可能已換）
                 targetChar = target.Character
                 if not targetChar then task.wait(0.2); continue end
                 torso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("UpperTorso")
@@ -696,22 +717,6 @@ thanosTask2Btn.MouseButton1Click:Connect(function()
         resetThanosTask2()
     end
 end)
-
--- ── 薩諾斯 幫助者 ────────────────────────────────────────────
-local rTH = makeRow(p1, 3, 56)
-makeLabel(rTH, "幫助者:", 6, 2, 50, 20, 11, THEME.textSub)
-local thanosHelpInput     = makeInput(rTH, "玩家名", 58, 6, 78, 22)
-local thanosHelpDistInput = makeInput(rTH, "5",      140, 6, 32, 22)
-thanosHelpDistInput.Text  = "5"
-makeLabel(rTH, "格", 176, 6, 18, 22, 10, THEME.textMuted)
-local thanosHelpBtn       = makeButton(rTH, "啟動", 196, 6, 44, 22)
-local thanosHelpStatus    = makeStatusLabel(rTH, 6, 34, 240)
-
-makeHelpRunner(
-    "薩幫助者", thanosHelpStatus, rTH, thanosHelpBtn,
-    function() return math.max(1, tonumber(thanosHelpDistInput.Text) or 5) end,
-    function() return findPlayerByPartialName(thanosHelpInput.Text) end
-)
 
 -- ============================================================
 -- 頁面2：耀西
@@ -860,22 +865,6 @@ yoshiTask14Btn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── 耀西 幫助者 ──────────────────────────────────────────────
-local rYH = makeRow(p2, 3, 56)
-makeLabel(rYH, "幫助者:", 6, 2, 50, 20, 11, THEME.textSub)
-local yoshiHelpInput     = makeInput(rYH, "玩家名", 58, 6, 78, 22)
-local yoshiHelpDistInput = makeInput(rYH, "5",     140, 6, 32, 22)
-yoshiHelpDistInput.Text  = "5"
-makeLabel(rYH, "格", 176, 6, 18, 22, 10, THEME.textMuted)
-local yoshiHelpBtn       = makeButton(rYH, "啟動", 196, 6, 44, 22)
-local yoshiHelpStatus    = makeStatusLabel(rYH, 6, 34, 240)
-
-makeHelpRunner(
-    "耀幫助者", yoshiHelpStatus, rYH, yoshiHelpBtn,
-    function() return math.max(1, tonumber(yoshiHelpDistInput.Text) or 5) end,
-    function() return findPlayerByPartialName(yoshiHelpInput.Text) end
-)
-
 -- ============================================================
 -- 頁面3：其他
 -- ============================================================
@@ -922,56 +911,68 @@ fixPosBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── 3-2 幫助模式 ──────────────────────────────────────────
-local r32 = makeRow(p3, 2, 56)
-makeLabel(r32, "幫助模式:", 6, 2, 90, 20, 11, THEME.textSub)
-local helpModeStatusLabel = makeStatusLabel(r32, 6, 34, 220)
-local helpModeBtn = makeButton(r32, "啟動", 210, 16, 42, 24)
+-- ── 3-2 合併幫助者 ────────────────────────────────────────
+-- 列高 80：標題列 + 輸入列 + 狀態列
+local r32 = makeRow(p3, 2, 82)
 
-local helpModeRunning = false
-local helpModeThread  = nil
+-- 第一行：標題 + 模式選擇
+makeLabel(r32, "幫助者:", 6, 4, 54, 18, 11, THEME.textSub)
 
-local function resetHelpMode()
-    helpModeRunning = false
-    if helpModeThread then pcall(function() task.cancel(helpModeThread) end); helpModeThread = nil end
-    setThemedBtnActive(helpModeBtn, false); helpModeBtn.Text = "啟動"
-    r32.BackgroundColor3 = THEME.bgRow
-    helpModeStatusLabel.Text = "未啟動"; helpModeStatusLabel.TextColor3 = THEME.textMuted
-    activeFeatures["幫助模式"] = false; updateStatus()
-end
+-- 模式切換按鈕（薩諾斯 / 耀西，純外觀，不影響邏輯——幫助者邏輯相同）
+local helpModeLabel = makeLabel(r32, "模式:", 62, 4, 36, 18, 10, THEME.textMuted)
+local helpModeThanos = Instance.new("TextButton")
+helpModeThanos.Size = UDim2.new(0, 42, 0, 18)
+helpModeThanos.Position = UDim2.new(0, 98, 0, 4)
+helpModeThanos.BackgroundColor3 = THEME.tabActive
+helpModeThanos.Text = "薩諾斯"; helpModeThanos.TextSize = 10
+helpModeThanos.Font = Enum.Font.GothamBold
+helpModeThanos.TextColor3 = THEME.textMain
+helpModeThanos.Parent = r32
+Instance.new("UICorner", helpModeThanos).CornerRadius = UDim.new(0, 4)
 
-helpModeBtn.MouseButton1Click:Connect(function()
-    helpModeRunning = not helpModeRunning
-    if helpModeRunning then
-        setThemedBtnActive(helpModeBtn, true); helpModeBtn.Text = "停止"
-        r32.BackgroundColor3 = THEME.activeRow
-        activeFeatures["幫助模式"] = true; updateStatus()
+local helpModeYoshi = Instance.new("TextButton")
+helpModeYoshi.Size = UDim2.new(0, 42, 0, 18)
+helpModeYoshi.Position = UDim2.new(0, 144, 0, 4)
+helpModeYoshi.BackgroundColor3 = THEME.tabBg
+helpModeYoshi.Text = "耀西"; helpModeYoshi.TextSize = 10
+helpModeYoshi.Font = Enum.Font.GothamBold
+helpModeYoshi.TextColor3 = THEME.textMuted
+helpModeYoshi.Parent = r32
+Instance.new("UICorner", helpModeYoshi).CornerRadius = UDim.new(0, 4)
 
-        helpModeThread = trackThread(task.spawn(function()
-            while helpModeRunning do
-                local victim = getNearestEggVictim(30)
-                if victim then
-                    helpModeStatusLabel.Text = "偵測到 egg_victim，重置中"
-                    helpModeStatusLabel.TextColor3 = THEME.green
-                    pcall(function()
-                        ReplicatedStorage.SelfKnockback:FireServer({
-                            Direction = Vector3.new(0, 0.01, 0),
-                            Force = 0
-                        })
-                    end)
-                    task.wait(1)
-                else
-                    helpModeStatusLabel.Text = "等待 egg_victim 靠近（30單位）"
-                    helpModeStatusLabel.TextColor3 = THEME.textMuted
-                    task.wait(0.2)
-                end
-            end
-            resetHelpMode()
-        end))
-    else
-        resetHelpMode()
-    end
+-- 模式切換邏輯（純顯示用，方便使用者識別；幫助者行為完全相同）
+local helpCurrentMode = "thanos"
+helpModeThanos.MouseButton1Click:Connect(function()
+    helpCurrentMode = "thanos"
+    helpModeThanos.BackgroundColor3 = THEME.tabActive
+    helpModeThanos.TextColor3 = THEME.textMain
+    helpModeYoshi.BackgroundColor3 = THEME.tabBg
+    helpModeYoshi.TextColor3 = THEME.textMuted
 end)
+helpModeYoshi.MouseButton1Click:Connect(function()
+    helpCurrentMode = "yoshi"
+    helpModeYoshi.BackgroundColor3 = THEME.tabActive
+    helpModeYoshi.TextColor3 = THEME.textMain
+    helpModeThanos.BackgroundColor3 = THEME.tabBg
+    helpModeThanos.TextColor3 = THEME.textMuted
+end)
+
+-- 第二行：玩家名 + 距離 + 啟動
+local unifiedHelpInput     = makeInput(r32, "玩家名",  6, 28, 110, 22)
+local unifiedHelpDistInput = makeInput(r32, "5",      120, 28,  32, 22)
+unifiedHelpDistInput.Text  = "5"
+makeLabel(r32, "格", 156, 28, 16, 22, 10, THEME.textMuted)
+local unifiedHelpBtn = makeButton(r32, "啟動", 174, 28, 44, 22)
+
+-- 第三行：狀態
+local unifiedHelpStatus = makeStatusLabel(r32, 6, 58, 248)
+
+makeUnifiedHelpRunner(
+    "幫助者", unifiedHelpStatus, r32, unifiedHelpBtn,
+    function() return math.max(1, tonumber(unifiedHelpDistInput.Text) or 5) end,
+    function() return findPlayerByPartialName(unifiedHelpInput.Text) end,
+    function() return helpCurrentMode end
+)
 
 -- ── 3-3 自動攻擊 ──────────────────────────────────────────
 local r33 = makeRow(p3, 3, 56)
@@ -980,7 +981,7 @@ local autoAtkStatusLabel = makeStatusLabel(r33, 6, 34, 230)
 autoAtkStatusLabel.Text = "未啟動（先手動打一次）"
 local autoAtkBtn = makeButton(r33, "啟動", 210, 16, 42, 24)
 
-local autoAtkRunning       = false
+local autoAtkRunning        = false
 local autoAtkDetectedEvents = {}
 local autoAtkPending        = false
 local autoAtkHookSet        = false
@@ -1116,14 +1117,14 @@ local fontSizeInput = makeInput(rInfoFont, "12", 88, 6, 60)
 fontSizeInput.Text = "12"
 
 local EXPLAIN_TEXT =
-    "【薩諾斯 / 耀西 - 幫助者】\n" ..
-    "輸入攻擊者玩家名（支援前綴匹配），設定距離（預設5格）後啟動。\n" ..
+    "【其他 - 幫助者】\n" ..
+    "輸入攻擊者玩家名（支援前綴匹配），選擇薩諾斯或耀西模式（純標示，邏輯相同），設定距離（預設5格）後啟動。\n" ..
     "持續將自己傳送到攻擊者正前方指定格數，讓對方能打到自己。\n" ..
     "只要偵測到 Workspace 裡的 egg_victim 在自己 30 單位內，才觸發 SelfKnockback 重置分身；" ..
     "沒有 egg_victim 在範圍內則只維持位置，不做任何重置。\n\n" ..
     "【薩諾斯 - 第一、三任務】\n" ..
-    "找最近的玩家，發送 GeneralHit 打一下，接著 GeneralAbility(1) 後等 0.5 秒發 GeneralAbility(2)。" ..
-    "等目標不處於 ragdoll 後，再打一次 GeneralHit，如此循環。\n\n" ..
+    "找最近的玩家，發送 GeneralHit 打一下，接著 GeneralAbility(1) 後等 0.5 秒發 GeneralAbility(2)。\n" ..
+    "等 2 秒冷卻後，再等目標不處於 ragdoll 持續穩定 0.8 秒，接著補打一次 GeneralHit，如此循環。\n\n" ..
     "【薩諾斯 - 第二任務】\n" ..
     "等自己不 ragdoll 後發動 GeneralAbility(1)，再等自己進入 ragdoll 並起身後，" ..
     "發動 GeneralAbility(2)，循環。\n\n" ..
@@ -1133,8 +1134,6 @@ local EXPLAIN_TEXT =
     "偵測自己正前方 10 單位內有無玩家，有則發動 GeneralAbility()，能力冷卻 3 秒，偵測不受冷卻。\n\n" ..
     "【其他 - 固定位置】\n" ..
     "啟動時記錄當前位置，持續鎖定 HumanoidRootPart CFrame 在該位置。\n\n" ..
-    "【其他 - 幫助模式】\n" ..
-    "偵測 Workspace 中的 egg_victim，在 30 單位內才觸發 SelfKnockback 重置分身。\n\n" ..
     "【其他 - 自動攻擊】\n" ..
     "透過 __namecall hook 偵測遊戲觸發的攻擊事件，偵測到後等最近目標不 ragdoll，" ..
     "再等 0.8 秒自動重發一次。需先手動打一次讓腳本學習事件。"
@@ -1240,7 +1239,7 @@ miniTitle.TextSize = 12; miniTitle.TextColor3 = THEME.accent; miniTitle.Parent =
 local expandBtn = Instance.new("TextButton")
 expandBtn.Text = "+"; expandBtn.Size = UDim2.new(0, 24, 0, 24)
 expandBtn.Position = UDim2.new(1, -28, 0, 4)
-expandBtn.BackgroundColor3 = THEME.primary  -- 縮小列不加入追蹤，保持預設
+expandBtn.BackgroundColor3 = THEME.primary
 expandBtn.TextColor3 = Color3.fromRGB(255,255,255)
 expandBtn.Font = Enum.Font.GothamBold; expandBtn.TextSize = 14
 expandBtn.Parent = miniFrame
@@ -1257,4 +1256,4 @@ closeBtn.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的薩諾斯、耀西精通腳本 v1.1 已載入！")
+print("貓玲的薩諾斯、耀西精通腳本 v1.2 已載入！")
