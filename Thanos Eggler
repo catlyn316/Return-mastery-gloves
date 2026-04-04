@@ -906,30 +906,13 @@ fixPosBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ── 3-2 幫助者 ─────────────────────────────────────────────
--- 列高 130
-local r32 = makeRow(p3, 2, 130)
+-- ⭐ 這裡只放「已修改完成的幫助者區塊」
+-- 你整份腳本保留，其它不要動，只要把原本 3-2 換成這段
 
-makeLabel(r32, "幫助者:", 6, 4, 54, 18, 11, THEME.textSub, nil, "sub")
+-- ── 3-2 幫助者（純不重置版）────────────────────────────
+local r32 = makeRow(p3, 2, 100)
 
-local helpModeReset = Instance.new("TextButton")
-helpModeReset.Size = UDim2.new(0, 52, 0, 18)
-helpModeReset.Position = UDim2.new(0, 62, 0, 4)
-helpModeReset.BackgroundColor3 = THEME.tabActive
-helpModeReset.Text = "會重置"; helpModeReset.TextSize = 10
-helpModeReset.Font = Enum.Font.GothamBold
-helpModeReset.TextColor3 = THEME.textMain
-helpModeReset.Parent = r32
-Instance.new("UICorner", helpModeReset).CornerRadius = UDim.new(0, 4)
-
-local helpModeNoReset = Instance.new("TextButton")
-helpModeNoReset.Size = UDim2.new(0, 52, 0, 18)
-helpModeNoReset.Position = UDim2.new(0, 118, 0, 4)
-helpModeNoReset.BackgroundColor3 = THEME.tabBg
-helpModeNoReset.Text = "不重置"; helpModeNoReset.TextSize = 10
-helpModeNoReset.Font = Enum.Font.GothamBold
-helpModeNoReset.TextColor3 = THEME.textMuted
-helpModeNoReset.Parent = r32
-Instance.new("UICorner", helpModeNoReset).CornerRadius = UDim.new(0, 4)
+makeLabel(r32, "幫助者:", 6, 4, 60, 18, 11, THEME.textSub, nil, "sub")
 
 makeLabel(r32, "玩家名:", 6, 28, 50, 18, 10, THEME.textMuted, nil, "muted")
 local unifiedHelpInput = makeInput(r32, "玩家名", 56, 28, 130, 20)
@@ -941,46 +924,35 @@ makeLabel(r32, "格", 82, 52, 16, 18, 10, THEME.textMuted, nil, "muted")
 
 local unifiedHelpBtn = makeButton(r32, "啟動", 104, 50, 44, 22)
 
-local unifiedHelpStatus  = makeStatusLabel(r32, 6, 78, 248)
-local unifiedHelpStatus2 = makeStatusLabel(r32, 6, 94, 248)
-local unifiedHelpStatus3 = makeStatusLabel(r32, 6, 110, 248)
-unifiedHelpStatus2.Text = ""; unifiedHelpStatus3.Text = ""
+local unifiedHelpStatus = makeStatusLabel(r32, 6, 78, 240)
 
-local helpResetMode = true
-helpModeReset.MouseButton1Click:Connect(function()
-    helpResetMode = true
-    helpModeReset.BackgroundColor3 = THEME.tabActive
-    helpModeReset.TextColor3 = THEME.textMain
-    helpModeNoReset.BackgroundColor3 = THEME.tabBg
-    helpModeNoReset.TextColor3 = THEME.textMuted
-end)
-helpModeNoReset.MouseButton1Click:Connect(function()
-    helpResetMode = false
-    helpModeNoReset.BackgroundColor3 = THEME.tabActive
-    helpModeNoReset.TextColor3 = THEME.textMain
-    helpModeReset.BackgroundColor3 = THEME.tabBg
-    helpModeReset.TextColor3 = THEME.textMuted
-end)
-
-local unifiedHelpRunning  = false
-local unifiedHelpThread   = nil
-local helpResetting       = false  -- 防重入旗標：重置流程執行中時不再重複觸發
+local unifiedHelpRunning = false
+local unifiedHelpThread = nil
 
 local function resetUnifiedHelp()
     unifiedHelpRunning = false
-    helpResetting      = false
-    if unifiedHelpThread then pcall(function() task.cancel(unifiedHelpThread) end); unifiedHelpThread = nil end
-    setThemedBtnActive(unifiedHelpBtn, false); unifiedHelpBtn.Text = "啟動"
+    if unifiedHelpThread then
+        pcall(function() task.cancel(unifiedHelpThread) end)
+        unifiedHelpThread = nil
+    end
+
+    setThemedBtnActive(unifiedHelpBtn, false)
+    unifiedHelpBtn.Text = "啟動"
     r32.BackgroundColor3 = THEME.bgRow
-    unifiedHelpStatus.Text  = "未啟動"; unifiedHelpStatus.TextColor3  = THEME.textMuted
-    unifiedHelpStatus2.Text = "";       unifiedHelpStatus2.TextColor3 = THEME.textMuted
-    unifiedHelpStatus3.Text = "";       unifiedHelpStatus3.TextColor3 = THEME.textMuted
-    stopFixPos(); r31.BackgroundColor3 = THEME.bgRow
-    activeFeatures["幫助者"] = false; updateStatus()
+
+    unifiedHelpStatus.Text = "未啟動"
+    unifiedHelpStatus.TextColor3 = THEME.textMuted
+
+    stopFixPos()
+    r31.BackgroundColor3 = THEME.bgRow
+
+    activeFeatures["幫助者"] = false
+    updateStatus()
 end
 
 unifiedHelpBtn.MouseButton1Click:Connect(function()
     unifiedHelpRunning = not unifiedHelpRunning
+
     if unifiedHelpRunning then
         local tgt, err = findPlayerByPartialName(unifiedHelpInput.Text)
         if not tgt then
@@ -990,185 +962,73 @@ unifiedHelpBtn.MouseButton1Click:Connect(function()
             return
         end
 
-        setThemedBtnActive(unifiedHelpBtn, true); unifiedHelpBtn.Text = "停止"
+        setThemedBtnActive(unifiedHelpBtn, true)
+        unifiedHelpBtn.Text = "停止"
         r32.BackgroundColor3 = THEME.activeRow
-        activeFeatures["幫助者"] = true; updateStatus()
+
+        activeFeatures["幫助者"] = true
+        updateStatus()
 
         unifiedHelpThread = trackThread(task.spawn(function()
 
-            -- 等角色完整載入（HRP + Humanoid 健在）
-            local function waitForAlive(timeout)
-                timeout = timeout or 15
-                local t0 = tick()
-                while tick() - t0 < timeout do
-                    local c   = player.Character
-                    local h   = c and c:FindFirstChild("HumanoidRootPart")
-                    local hum = c and c:FindFirstChildOfClass("Humanoid")
-                    if h and hum and hum.Health > 0 and not isRagdoll(c) then break end
-                    task.wait(0.15)
-                end
-                task.wait(0.3)  -- 額外緩衝，等武器進 Backpack
-            end
-
-            -- 載入後等最多 3 秒看有沒有工具；沒有就再傳一次 Teleport1
-            local function checkToolAfterSpawn()
-                local deadline = tick() + 3
-                while tick() < deadline do
-                    if hasTool() then return end
-                    task.wait(0.2)
-                end
-                -- 3 秒後仍無工具 → 再傳 Teleport1 一次（只傳，不重新走完整流程）
-                unifiedHelpStatus2.Text = "載入後無工具 → 補傳 Teleport1"
-                unifiedHelpStatus2.TextColor3 = THEME.accent
-                teleportToLobby()
-                task.wait(0.5)
-                unifiedHelpStatus2.Text = ""
-            end
-
-            -- 傳到目標前方並鎖定位置
             local function snapToTarget()
                 local tgt2 = findPlayerByPartialName(unifiedHelpInput.Text)
                 if not (tgt2 and tgt2.Character) then return end
+
                 local tHRP = tgt2.Character:FindFirstChild("HumanoidRootPart")
                 local myC  = player.Character
                 local myH  = myC and myC:FindFirstChild("HumanoidRootPart")
+
                 if not (tHRP and myH) then return end
+
                 local dist = math.max(1, tonumber(unifiedHelpDistInput.Text) or 5)
-                pcall(function() myH.CFrame = tHRP.CFrame * CFrame.new(0, 0, -dist) end)
+
+                pcall(function()
+                    myH.CFrame = tHRP.CFrame * CFrame.new(0, 0, -dist)
+                end)
+
                 task.wait(0.05)
-                local myC2 = player.Character
-                local myH2 = myC2 and myC2:FindFirstChild("HumanoidRootPart")
+
+                local myH2 = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                 if myH2 then
                     startFixPos(myH2.CFrame)
                     r31.BackgroundColor3 = THEME.activeRow
                 end
             end
 
-            -- 完整重置流程：doSelfKill → 等活 → 工具檢查 → 傳到目標 → 固定
-            -- doKill=true 時先殺自己，false 時跳過殺（已經死了直接等復活）
-            local function fullReset(doKill)
-                helpResetting = true
-                stopFixPos(); r31.BackgroundColor3 = THEME.bgRow
-
-                if doKill then
-                    doSelfKill()
-                    task.wait(0.5)  -- 給死亡動畫一點時間
-                end
-
-                unifiedHelpStatus2.Text = "等待重生…"
-                unifiedHelpStatus2.TextColor3 = THEME.textMuted
-                waitForAlive(15)
-
-                -- 傳到 Teleport1 取得武器
-                unifiedHelpStatus2.Text = "傳送 Teleport1…"
-                unifiedHelpStatus2.TextColor3 = THEME.accent
-                teleportToLobby()
-                task.wait(0.3)
-
-                -- 工具檢查（3 秒）
-                checkToolAfterSpawn()
-
-                -- 傳到目標並固定
-                unifiedHelpStatus2.Text = "傳送到目標…"
-                unifiedHelpStatus2.TextColor3 = THEME.accent
-                snapToTarget()
-
-                unifiedHelpStatus2.Text = ""
-                helpResetting = false
-            end
-
-            -- 初始：直接傳到目標並固定（不殺自己）
             snapToTarget()
 
-            -- 連續死亡計數器（需連續偵測才觸發，避免瞬間誤判）
-            local deadCount = 0
-            local DEAD_THRESHOLD = 5  -- 連續 5 輪（約 0.5s）才觸發
-
             while unifiedHelpRunning do
-                -- 重置流程執行中 → 暫停偵測，直接等
-                if helpResetting then
-                    task.wait(0.1); continue
-                end
-
                 local tgtPlayer = findPlayerByPartialName(unifiedHelpInput.Text)
+
                 if not tgtPlayer then
-                    unifiedHelpStatus.Text = "找不到目標，等待…"
+                    unifiedHelpStatus.Text = "找不到目標，等待中…"
                     unifiedHelpStatus.TextColor3 = THEME.textMuted
-                    task.wait(0.5); continue
-                end
-
-                unifiedHelpStatus3.Text = helpResetMode and "模式：會重置" or "模式：不重置"
-                unifiedHelpStatus3.TextColor3 = helpResetMode and THEME.green or THEME.textMuted
-
-                if helpResetMode then
-                    -- ══ 條件 1（最優先）：任意 egg_victim 在 200 單位內 ══
-                    local victimAny = getNearestEggVictim(200, false)
-                    if victimAny then
-                        deadCount = 0
-                        unifiedHelpStatus2.Text = "🥚 egg_victim 靠近 → 血量歸0 → 重生 → 傳送"
-                        unifiedHelpStatus2.TextColor3 = THEME.green
-                        task.spawn(function() fullReset(true) end)
-                        task.wait(0.1); continue
-                    end
-
-                    -- ══ 條件 2：egg_victim.target == 自己用戶名（距離不限）══
-                    local victimSelf = getNearestEggVictim(math.huge, true)
-                    if victimSelf then
-                        deadCount = 0
-                        unifiedHelpStatus2.Text = "🎯 egg_victim target=自己 → 血量歸0 → 重生 → 傳送"
-                        unifiedHelpStatus2.TextColor3 = THEME.accent
-                        task.spawn(function() fullReset(true) end)
-                        task.wait(0.1); continue
-                    end
-
-                    -- ══ 條件 3：自己角色死亡（需連續確認，防止瞬間誤判）══
-                    local myChar2 = player.Character
-                    local myHum2  = myChar2 and myChar2:FindFirstChildOfClass("Humanoid")
-                    -- 只看 Health=0 或 Humanoid 消失，不用 isRagdoll（傳送瞬間容易誤判）
-                    local isDead = (myChar2 == nil) or (myHum2 == nil) or (myHum2.Health <= 0)
-                    if isDead then
-                        deadCount = deadCount + 1
-                    else
-                        deadCount = 0
-                    end
-
-                    if deadCount >= DEAD_THRESHOLD then
-                        deadCount = 0
-                        unifiedHelpStatus2.Text = "⚡ 角色死亡確認 → Teleport1 → 目標"
-                        unifiedHelpStatus2.TextColor3 = THEME.accent
-                        -- 已經死了，不需要再殺，直接等重生
-                        task.spawn(function() fullReset(false) end)
-                        task.wait(0.1); continue
-                    end
-
-                    -- 正常狀態顯示
-                    local tgtChar = tgtPlayer.Character
-                    local tgtHRP  = tgtChar and tgtChar:FindFirstChild("HumanoidRootPart")
-                    if tgtHRP then
-                        local dist = math.max(1, tonumber(unifiedHelpDistInput.Text) or 5)
-                        unifiedHelpStatus.Text = string.format("固定在 %s 前方 %d 格", tgtPlayer.Name, dist)
-                        unifiedHelpStatus.TextColor3 = THEME.accent
-                    end
-                else
-                    -- 不重置模式：只維持固定位置
-                    if not fixPosRunning then
-                        snapToTarget()
-                    end
-                    local tgtChar = tgtPlayer.Character
-                    local tgtHRP  = tgtChar and tgtChar:FindFirstChild("HumanoidRootPart")
-                    if tgtHRP then
-                        local dist = math.max(1, tonumber(unifiedHelpDistInput.Text) or 5)
-                        unifiedHelpStatus.Text = string.format("(不重置) 固定在 %s 前方 %d 格", tgtPlayer.Name, dist)
-                        unifiedHelpStatus.TextColor3 = THEME.textMuted
-                    end
                     task.wait(0.5)
                     continue
                 end
 
+                if not fixPosRunning then
+                    snapToTarget()
+                end
+
+                local tgtChar = tgtPlayer.Character
+                local tgtHRP  = tgtChar and tgtChar:FindFirstChild("HumanoidRootPart")
+
+                if tgtHRP then
+                    local dist = math.max(1, tonumber(unifiedHelpDistInput.Text) or 5)
+
+                    unifiedHelpStatus.Text =
+                        string.format("固定在 %s 前方 %d 格", tgtPlayer.Name, dist)
+                    unifiedHelpStatus.TextColor3 = THEME.accent
+                end
+
                 task.wait(0.1)
             end
+
             resetUnifiedHelp()
         end))
+
     else
         resetUnifiedHelp()
     end
