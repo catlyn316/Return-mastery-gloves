@@ -1,4 +1,4 @@
--- 貓玲的精通刷取腳本 v1.0
+-- 貓玲的薩諾斯、耀西精通腳本 v1.1
 -- 分區：薩諾斯 / 耀西 / 其他 / 說明
 
 local CoreGui           = game:GetService("CoreGui")
@@ -22,7 +22,7 @@ pcall(function()
 end)
 
 -- ============================================================
--- 主題（預設紫色，切換頁面時改變）
+-- 主題
 -- ============================================================
 local THEMES = {
     thanos = {
@@ -41,6 +41,7 @@ local THEMES = {
         red         = Color3.fromRGB(200,  45,  45),
         green       = Color3.fromRGB( 40, 200,  90),
         statusBg    = Color3.fromRGB(  6,   3,  12),
+        activeRow   = Color3.fromRGB( 14,   5,  26),
     },
     yoshi = {
         primary     = Color3.fromRGB(200, 175,  50),
@@ -58,6 +59,7 @@ local THEMES = {
         red         = Color3.fromRGB(200,  45,  45),
         green       = Color3.fromRGB( 40, 200,  90),
         statusBg    = Color3.fromRGB( 10,   9,   3),
+        activeRow   = Color3.fromRGB( 20,  18,   5),
     },
     other = {
         primary     = Color3.fromRGB(130,  60, 200),
@@ -75,6 +77,7 @@ local THEMES = {
         red         = Color3.fromRGB(200,  45,  45),
         green       = Color3.fromRGB( 40, 200,  90),
         statusBg    = Color3.fromRGB(  6,   3,  12),
+        activeRow   = Color3.fromRGB( 14,   5,  26),
     },
     info = {
         primary     = Color3.fromRGB(130,  60, 200),
@@ -92,16 +95,34 @@ local THEMES = {
         red         = Color3.fromRGB(200,  45,  45),
         green       = Color3.fromRGB( 40, 200,  90),
         statusBg    = Color3.fromRGB(  6,   3,  12),
+        activeRow   = Color3.fromRGB( 14,   5,  26),
     },
 }
 
-local THEME = THEMES.thanos  -- 預設
+local THEME = THEMES.thanos
+
+-- 追蹤所有應跟主題色走的按鈕（不含固定顏色的按鈕）
+-- 每筆：{ btn = TextButton, isActive = bool }
+local themedButtons = {}
+
+local function registerThemedButton(btn)
+    table.insert(themedButtons, { btn = btn, isActive = false })
+end
+
+-- 設定按鈕啟動/未啟動狀態，同時更新 themedButtons 裡的 isActive
+local function setThemedBtnActive(btn, active)
+    for _, entry in ipairs(themedButtons) do
+        if entry.btn == btn then
+            entry.isActive = active
+            break
+        end
+    end
+    btn.BackgroundColor3 = active and THEME.red or THEME.primary
+end
 
 -- ============================================================
 -- 工具函式
 -- ============================================================
-
--- ragdoll 判定（目標角色）
 local function isRagdoll(character)
     if not character then return true end
     local hum = character:FindFirstChildOfClass("Humanoid")
@@ -120,7 +141,6 @@ local function isSelfRagdoll()
     return isRagdoll(player.Character)
 end
 
--- 取得最近的玩家（從 Players，排除自己）
 local function getNearestPlayer()
     local char = player.Character
     local hrp  = char and char:FindFirstChild("HumanoidRootPart")
@@ -135,7 +155,6 @@ local function getNearestPlayer()
     return nearest
 end
 
--- 取得最近的 egg_victim（Workspace 中名稱含 egg_victim 的 Model，30 單位內最近）
 local function getNearestEggVictim(maxDist)
     local char = player.Character
     local hrp  = char and char:FindFirstChild("HumanoidRootPart")
@@ -152,6 +171,35 @@ local function getNearestEggVictim(maxDist)
         end
     end
     return nearest
+end
+
+local function findPlayerByPartialName(input)
+    if not input or input == "" then return nil, "請輸入玩家名稱" end
+    input = input:lower()
+    local matches = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then
+            if p.Name:lower():sub(1, #input) == input or p.DisplayName:lower():sub(1, #input) == input then
+                table.insert(matches, p)
+            end
+        end
+    end
+    if #matches == 0 then return nil, "找不到玩家"
+    elseif #matches == 1 then return matches[1], nil
+    else
+        local names = {}
+        for _, p in ipairs(matches) do table.insert(names, p.Name) end
+        return nil, "找到多個: " .. table.concat(names, ", ")
+    end
+end
+
+local function waitNotRagdoll(getCharFn, timeout)
+    timeout = timeout or 10
+    local t0 = tick()
+    while isRagdoll(getCharFn()) do
+        if tick() - t0 > timeout then break end
+        task.wait(0.1)
+    end
 end
 
 -- ============================================================
@@ -185,7 +233,6 @@ Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
 local mainStroke = Instance.new("UIStroke")
 mainStroke.Color = THEME.primaryDark; mainStroke.Thickness = 1.5; mainStroke.Parent = mainFrame
 
--- 標題列
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 32)
 titleBar.BackgroundColor3 = THEME.titleBg
@@ -195,8 +242,8 @@ Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, -60, 1, 0)
 titleLabel.BackgroundTransparency = 1
-titleLabel.Text = "貓玲的精通刷取"
-titleLabel.TextSize = 13; titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Text = "貓玲的薩諾斯、耀西精通腳本"
+titleLabel.TextSize = 12; titleLabel.Font = Enum.Font.GothamBold
 titleLabel.TextColor3 = THEME.accent
 titleLabel.TextXAlignment = Enum.TextXAlignment.Center
 titleLabel.Parent = titleBar
@@ -220,9 +267,9 @@ closeBtn.Parent = titleBar
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 5)
 
 -- ============================================================
--- 分頁按鈕列
+-- 分頁列
 -- ============================================================
-local tabNames = {"薩諾斯","耀西","其他","說明"}
+local tabNames     = {"薩諾斯","耀西","其他","說明"}
 local tabThemeKeys = {"thanos","yoshi","other","info"}
 
 local tabBar = Instance.new("Frame")
@@ -235,8 +282,7 @@ Instance.new("UICorner", tabBar).CornerRadius = UDim.new(0, 6)
 
 local tabScroll = Instance.new("ScrollingFrame")
 tabScroll.Size = UDim2.new(1, 0, 1, 0)
-tabScroll.BackgroundTransparency = 1
-tabScroll.BorderSizePixel = 0
+tabScroll.BackgroundTransparency = 1; tabScroll.BorderSizePixel = 0
 tabScroll.ScrollBarThickness = 0
 tabScroll.ScrollingDirection = Enum.ScrollingDirection.X
 tabScroll.AutomaticCanvasSize = Enum.AutomaticSize.X
@@ -256,16 +302,13 @@ tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 tabLayout.Parent = tabInner
 
 local tabPad = Instance.new("UIPadding")
-tabPad.PaddingLeft  = UDim.new(0, 3)
-tabPad.PaddingRight = UDim.new(0, 3)
+tabPad.PaddingLeft = UDim.new(0, 3); tabPad.PaddingRight = UDim.new(0, 3)
 tabPad.Parent = tabInner
-
-local TAB_W = 60
 
 local tabButtons = {}
 for i, name in ipairs(tabNames) do
     local tb = Instance.new("TextButton")
-    tb.Size = UDim2.new(0, TAB_W, 0, 22)
+    tb.Size = UDim2.new(0, 60, 0, 22)
     tb.BackgroundColor3 = THEME.tabBg
     tb.Text = name; tb.TextSize = 11
     tb.Font = Enum.Font.GothamBold
@@ -288,13 +331,11 @@ contentContainer.Parent = mainFrame
 local function createPage()
     local page = Instance.new("ScrollingFrame")
     page.Size = UDim2.new(1, 0, 1, 0)
-    page.BackgroundTransparency = 1
-    page.BorderSizePixel = 0
+    page.BackgroundTransparency = 1; page.BorderSizePixel = 0
     page.ScrollBarThickness = 4
     page.ScrollBarImageColor3 = THEME.primary
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    page.Visible = false
-    page.Parent = contentContainer
+    page.Visible = false; page.Parent = contentContainer
     local layout = Instance.new("UIListLayout")
     layout.Padding = UDim.new(0, 6)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -322,26 +363,32 @@ statusLabel.Parent = mainFrame
 Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
 
 -- ============================================================
--- 主題切換函式（更新現有 UI 物件的顏色）
+-- 主題套用（含更新所有追蹤中的按鈕）
 -- ============================================================
 local function applyTheme(t)
     THEME = t
-    mainFrame.BackgroundColor3 = THEME.bg
-    mainStroke.Color = THEME.primaryDark
-    titleBar.BackgroundColor3 = THEME.titleBg
-    titleLabel.TextColor3 = THEME.accent
+    mainFrame.BackgroundColor3   = THEME.bg
+    mainStroke.Color             = THEME.primaryDark
+    titleBar.BackgroundColor3    = THEME.titleBg
+    titleLabel.TextColor3        = THEME.accent
     minimizeBtn.BackgroundColor3 = THEME.tabActive
-    minimizeBtn.TextColor3 = THEME.textMain
-    tabBar.BackgroundColor3 = THEME.tabBg
+    minimizeBtn.TextColor3       = THEME.textMain
+    tabBar.BackgroundColor3      = THEME.tabBg
     statusLabel.BackgroundColor3 = THEME.statusBg
-    statusLabel.TextColor3 = THEME.primary
+    statusLabel.TextColor3       = THEME.primary
     for _, page in ipairs(pages) do
         page.ScrollBarImageColor3 = THEME.primary
+    end
+    -- 未啟動的按鈕換主題色；已啟動（紅色）的不動
+    for _, entry in ipairs(themedButtons) do
+        if not entry.isActive then
+            entry.btn.BackgroundColor3 = THEME.primary
+        end
     end
 end
 
 -- ============================================================
--- UI 建構小工具
+-- UI 工具
 -- ============================================================
 local function makeRow(parent, order, height)
     local f = Instance.new("Frame")
@@ -366,6 +413,7 @@ local function makeLabel(parent, text, xOff, yOff, w, h, size, color, align)
     return l
 end
 
+-- 自動加入主題色追蹤（未傳 color 時）
 local function makeButton(parent, text, x, y, w, h, color)
     local b = Instance.new("TextButton")
     b.Size = UDim2.new(0, w, 0, h or 24)
@@ -376,6 +424,9 @@ local function makeButton(parent, text, x, y, w, h, color)
     b.TextColor3 = Color3.fromRGB(255,255,255)
     b.Parent = parent
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 5)
+    if not color then
+        registerThemedButton(b)
+    end
     return b
 end
 
@@ -394,6 +445,18 @@ local function makeInput(parent, placeholder, x, y, w, h)
     return box
 end
 
+local function makeStatusLabel(parent, x, y, w)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(0, w, 0, 16)
+    l.Position = UDim2.new(0, x, 0, y)
+    l.BackgroundTransparency = 1
+    l.Text = "未啟動"; l.TextSize = 10; l.Font = Enum.Font.Gotham
+    l.TextColor3 = THEME.textMuted
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = parent
+    return l
+end
+
 local activeFeatures = {}
 local function updateStatus()
     local list = {}
@@ -407,13 +470,90 @@ local function updateStatus()
     end
 end
 
--- ============================================================
--- 共用執行緒追蹤
--- ============================================================
 local allThreads = {}
-local function trackThread(t)
-    table.insert(allThreads, t)
-    return t
+local function trackThread(t) table.insert(allThreads, t); return t end
+
+-- ============================================================
+-- 幫助者共用函式
+-- 傳送到攻擊者正前方 dist 單位，egg_victim ≤ 30 單位才重置
+-- ============================================================
+local function makeHelpRunner(featureKey, statusLbl, rowFrame, btn, getDistFn, getTargetInputFn)
+    local running = false
+    local thread  = nil
+
+    local function resetFn()
+        running = false
+        if thread then pcall(function() task.cancel(thread) end); thread = nil end
+        setThemedBtnActive(btn, false); btn.Text = "啟動"
+        rowFrame.BackgroundColor3 = THEME.bgRow
+        statusLbl.Text = "未啟動"; statusLbl.TextColor3 = THEME.textMuted
+        activeFeatures[featureKey] = false; updateStatus()
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        running = not running
+        if running then
+            -- 先驗證玩家名
+            local tgt, err = getTargetInputFn()
+            if not tgt then
+                statusLbl.Text = err or "找不到目標"
+                statusLbl.TextColor3 = THEME.red
+                running = false
+                return
+            end
+
+            setThemedBtnActive(btn, true); btn.Text = "停止"
+            rowFrame.BackgroundColor3 = THEME.activeRow
+            activeFeatures[featureKey] = true; updateStatus()
+
+            thread = trackThread(task.spawn(function()
+                while running do
+                    -- 每次重新查找（防目標離線）
+                    local tgtPlayer = getTargetInputFn()
+                    if not tgtPlayer then
+                        statusLbl.Text = "找不到目標，等待…"
+                        statusLbl.TextColor3 = THEME.textMuted
+                        task.wait(0.5); continue
+                    end
+
+                    local myChar = player.Character
+                    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+                    if not myHRP then task.wait(0.2); continue end
+
+                    local tgtChar = tgtPlayer.Character
+                    local tgtHRP  = tgtChar and tgtChar:FindFirstChild("HumanoidRootPart")
+
+                    if tgtHRP then
+                        local dist = getDistFn()
+                        -- 傳送到目標正前方 dist 單位（目標 LookVector 方向的前方）
+                        local frontCFrame = tgtHRP.CFrame * CFrame.new(0, 0, -dist)
+                        pcall(function() myHRP.CFrame = frontCFrame end)
+                        statusLbl.Text = string.format("在 %s 前方 %d 格", tgtPlayer.Name, dist)
+                        statusLbl.TextColor3 = THEME.accent
+                    end
+
+                    -- 偵測 egg_victim ≤ 30 單位，才重置
+                    local victim = getNearestEggVictim(30)
+                    if victim then
+                        statusLbl.Text = "偵測到 egg_victim，重置"
+                        statusLbl.TextColor3 = THEME.green
+                        pcall(function()
+                            ReplicatedStorage.SelfKnockback:FireServer({
+                                Direction = Vector3.new(0, 0.01, 0),
+                                Force = 0
+                            })
+                        end)
+                        task.wait(1)
+                    else
+                        task.wait(0.05)
+                    end
+                end
+                resetFn()
+            end))
+        else
+            resetFn()
+        end
+    end)
 end
 
 -- ============================================================
@@ -421,40 +561,21 @@ end
 -- ============================================================
 local p1 = pages[1]
 
--- 薩諾斯任務狀態
 local thanosTask13Running = false
 local thanosTask13Thread  = nil
 local thanosTask2Running  = false
 local thanosTask2Thread   = nil
 
--- 等待目標離開 ragdoll（帶 timeout，避免卡死）
-local function waitNotRagdoll(getCharFn, timeout)
-    timeout = timeout or 10
-    local t0 = tick()
-    while isRagdoll(getCharFn()) do
-        if tick() - t0 > timeout then break end
-        task.wait(0.1)
-    end
-end
-
 -- ── 薩諾斯 第一、三任務 ──────────────────────────────────────
 local rT1 = makeRow(p1, 1, 56)
 makeLabel(rT1, "第一、三任務:", 6, 2, 100, 20, 11, THEME.textSub)
-local thanosTask13StatusLabel = Instance.new("TextLabel")
-thanosTask13StatusLabel.Size = UDim2.new(0, 160, 0, 16)
-thanosTask13StatusLabel.Position = UDim2.new(0, 6, 0, 34)
-thanosTask13StatusLabel.BackgroundTransparency = 1
-thanosTask13StatusLabel.Text = "未啟動"
-thanosTask13StatusLabel.TextSize = 10; thanosTask13StatusLabel.Font = Enum.Font.Gotham
-thanosTask13StatusLabel.TextColor3 = THEME.textMuted
-thanosTask13StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-thanosTask13StatusLabel.Parent = rT1
+local thanosTask13StatusLabel = makeStatusLabel(rT1, 6, 34, 200)
 local thanosTask13Btn = makeButton(rT1, "啟動", 210, 16, 42, 24)
 
 local function resetThanosTask13()
     thanosTask13Running = false
     if thanosTask13Thread then pcall(function() task.cancel(thanosTask13Thread) end); thanosTask13Thread = nil end
-    thanosTask13Btn.Text = "啟動"; thanosTask13Btn.BackgroundColor3 = THEME.primary
+    setThemedBtnActive(thanosTask13Btn, false); thanosTask13Btn.Text = "啟動"
     rT1.BackgroundColor3 = THEME.bgRow
     thanosTask13StatusLabel.Text = "未啟動"; thanosTask13StatusLabel.TextColor3 = THEME.textMuted
     activeFeatures["薩1/3任務"] = false; updateStatus()
@@ -463,21 +584,18 @@ end
 thanosTask13Btn.MouseButton1Click:Connect(function()
     thanosTask13Running = not thanosTask13Running
     if thanosTask13Running then
-        thanosTask13Btn.Text = "停止"; thanosTask13Btn.BackgroundColor3 = THEME.red
-        rT1.BackgroundColor3 = Color3.fromRGB(14, 5, 26)
+        setThemedBtnActive(thanosTask13Btn, true); thanosTask13Btn.Text = "停止"
+        rT1.BackgroundColor3 = THEME.activeRow
         activeFeatures["薩1/3任務"] = true; updateStatus()
 
         thanosTask13Thread = trackThread(task.spawn(function()
             while thanosTask13Running do
-                -- 找最近玩家
                 local target = getNearestPlayer()
                 if not target or not target.Character then
                     thanosTask13StatusLabel.Text = "找不到目標，等待中…"
                     thanosTask13StatusLabel.TextColor3 = THEME.textMuted
-                    task.wait(0.5)
-                    continue
+                    task.wait(0.5); continue
                 end
-
                 local targetChar = target.Character
                 local torso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("UpperTorso")
                 if not torso then task.wait(0.3); continue end
@@ -485,42 +603,32 @@ thanosTask13Btn.MouseButton1Click:Connect(function()
                 thanosTask13StatusLabel.Text = "攻擊: " .. target.Name
                 thanosTask13StatusLabel.TextColor3 = THEME.accent
 
-                -- 打一下
                 pcall(function()
                     ReplicatedStorage.GeneralHit:FireServer(
-                        Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso")
-                        or torso
+                        Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso") or torso
                     )
                 end)
-
-                -- 能力 1
                 pcall(function() ReplicatedStorage.GeneralAbility:FireServer(1) end)
                 task.wait(0.5)
-                -- 能力 2
                 pcall(function() ReplicatedStorage.GeneralAbility:FireServer(2) end)
 
-                -- 等目標不 ragdoll
                 thanosTask13StatusLabel.Text = "等待 " .. target.Name .. " 起身"
                 thanosTask13StatusLabel.TextColor3 = THEME.textMuted
                 waitNotRagdoll(function()
                     return Players:FindFirstChild(target.Name) and Players[target.Name].Character
                 end)
-
                 if not thanosTask13Running then break end
 
-                -- 再打一下
                 targetChar = target.Character
                 if not targetChar then task.wait(0.2); continue end
                 torso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("UpperTorso")
                 if torso then
                     pcall(function()
                         ReplicatedStorage.GeneralHit:FireServer(
-                            Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso")
-                            or torso
+                            Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso") or torso
                         )
                     end)
                 end
-
                 task.wait(0.05)
             end
             resetThanosTask13()
@@ -533,21 +641,13 @@ end)
 -- ── 薩諾斯 第二任務 ──────────────────────────────────────────
 local rT2 = makeRow(p1, 2, 56)
 makeLabel(rT2, "第二任務:", 6, 2, 100, 20, 11, THEME.textSub)
-local thanosTask2StatusLabel = Instance.new("TextLabel")
-thanosTask2StatusLabel.Size = UDim2.new(0, 160, 0, 16)
-thanosTask2StatusLabel.Position = UDim2.new(0, 6, 0, 34)
-thanosTask2StatusLabel.BackgroundTransparency = 1
-thanosTask2StatusLabel.Text = "未啟動"
-thanosTask2StatusLabel.TextSize = 10; thanosTask2StatusLabel.Font = Enum.Font.Gotham
-thanosTask2StatusLabel.TextColor3 = THEME.textMuted
-thanosTask2StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-thanosTask2StatusLabel.Parent = rT2
+local thanosTask2StatusLabel = makeStatusLabel(rT2, 6, 34, 200)
 local thanosTask2Btn = makeButton(rT2, "啟動", 210, 16, 42, 24)
 
 local function resetThanosTask2()
     thanosTask2Running = false
     if thanosTask2Thread then pcall(function() task.cancel(thanosTask2Thread) end); thanosTask2Thread = nil end
-    thanosTask2Btn.Text = "啟動"; thanosTask2Btn.BackgroundColor3 = THEME.primary
+    setThemedBtnActive(thanosTask2Btn, false); thanosTask2Btn.Text = "啟動"
     rT2.BackgroundColor3 = THEME.bgRow
     thanosTask2StatusLabel.Text = "未啟動"; thanosTask2StatusLabel.TextColor3 = THEME.textMuted
     activeFeatures["薩2任務"] = false; updateStatus()
@@ -556,45 +656,38 @@ end
 thanosTask2Btn.MouseButton1Click:Connect(function()
     thanosTask2Running = not thanosTask2Running
     if thanosTask2Running then
-        thanosTask2Btn.Text = "停止"; thanosTask2Btn.BackgroundColor3 = THEME.red
-        rT2.BackgroundColor3 = Color3.fromRGB(14, 5, 26)
+        setThemedBtnActive(thanosTask2Btn, true); thanosTask2Btn.Text = "停止"
+        rT2.BackgroundColor3 = THEME.activeRow
         activeFeatures["薩2任務"] = true; updateStatus()
 
         thanosTask2Thread = trackThread(task.spawn(function()
             while thanosTask2Running do
-                -- 等自己不 ragdoll
                 if isSelfRagdoll() then
                     thanosTask2StatusLabel.Text = "Ragdoll 中，等待…"
                     thanosTask2StatusLabel.TextColor3 = THEME.textMuted
                     waitNotRagdoll(function() return player.Character end)
                     if not thanosTask2Running then break end
                 end
-
                 thanosTask2StatusLabel.Text = "發動能力 1"
                 thanosTask2StatusLabel.TextColor3 = THEME.accent
                 pcall(function() ReplicatedStorage.GeneralAbility:FireServer(1) end)
 
-                -- 等自己進入 ragdoll
                 thanosTask2StatusLabel.Text = "等待自身 Ragdoll…"
                 thanosTask2StatusLabel.TextColor3 = THEME.textMuted
                 local t0 = tick()
                 while not isSelfRagdoll() and thanosTask2Running do
-                    if tick() - t0 > 8 then break end  -- timeout 8秒
+                    if tick() - t0 > 8 then break end
                     task.wait(0.05)
                 end
-
                 if not thanosTask2Running then break end
 
-                -- 等自己起身
                 thanosTask2StatusLabel.Text = "Ragdoll 中，等待起身…"
                 waitNotRagdoll(function() return player.Character end)
-
                 if not thanosTask2Running then break end
 
                 thanosTask2StatusLabel.Text = "發動能力 2"
                 thanosTask2StatusLabel.TextColor3 = THEME.green
                 pcall(function() ReplicatedStorage.GeneralAbility:FireServer(2) end)
-
                 task.wait(0.1)
             end
             resetThanosTask2()
@@ -603,6 +696,22 @@ thanosTask2Btn.MouseButton1Click:Connect(function()
         resetThanosTask2()
     end
 end)
+
+-- ── 薩諾斯 幫助者 ────────────────────────────────────────────
+local rTH = makeRow(p1, 3, 56)
+makeLabel(rTH, "幫助者:", 6, 2, 50, 20, 11, THEME.textSub)
+local thanosHelpInput     = makeInput(rTH, "玩家名", 58, 6, 78, 22)
+local thanosHelpDistInput = makeInput(rTH, "5",      140, 6, 32, 22)
+thanosHelpDistInput.Text  = "5"
+makeLabel(rTH, "格", 176, 6, 18, 22, 10, THEME.textMuted)
+local thanosHelpBtn       = makeButton(rTH, "啟動", 196, 6, 44, 22)
+local thanosHelpStatus    = makeStatusLabel(rTH, 6, 34, 240)
+
+makeHelpRunner(
+    "薩幫助者", thanosHelpStatus, rTH, thanosHelpBtn,
+    function() return math.max(1, tonumber(thanosHelpDistInput.Text) or 5) end,
+    function() return findPlayerByPartialName(thanosHelpInput.Text) end
+)
 
 -- ============================================================
 -- 頁面2：耀西
@@ -617,21 +726,13 @@ local yoshiTask14Thread  = nil
 -- ── 耀西 第二、三任務 ──────────────────────────────────────
 local rY1 = makeRow(p2, 1, 56)
 makeLabel(rY1, "第二、三任務:", 6, 2, 100, 20, 11, THEME.textSub)
-local yoshiTask23StatusLabel = Instance.new("TextLabel")
-yoshiTask23StatusLabel.Size = UDim2.new(0, 160, 0, 16)
-yoshiTask23StatusLabel.Position = UDim2.new(0, 6, 0, 34)
-yoshiTask23StatusLabel.BackgroundTransparency = 1
-yoshiTask23StatusLabel.Text = "未啟動"
-yoshiTask23StatusLabel.TextSize = 10; yoshiTask23StatusLabel.Font = Enum.Font.Gotham
-yoshiTask23StatusLabel.TextColor3 = THEME.textMuted
-yoshiTask23StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-yoshiTask23StatusLabel.Parent = rY1
+local yoshiTask23StatusLabel = makeStatusLabel(rY1, 6, 34, 200)
 local yoshiTask23Btn = makeButton(rY1, "啟動", 210, 16, 42, 24)
 
 local function resetYoshiTask23()
     yoshiTask23Running = false
     if yoshiTask23Thread then pcall(function() task.cancel(yoshiTask23Thread) end); yoshiTask23Thread = nil end
-    yoshiTask23Btn.Text = "啟動"; yoshiTask23Btn.BackgroundColor3 = THEME.primary
+    setThemedBtnActive(yoshiTask23Btn, false); yoshiTask23Btn.Text = "啟動"
     rY1.BackgroundColor3 = THEME.bgRow
     yoshiTask23StatusLabel.Text = "未啟動"; yoshiTask23StatusLabel.TextColor3 = THEME.textMuted
     activeFeatures["耀2/3任務"] = false; updateStatus()
@@ -640,8 +741,8 @@ end
 yoshiTask23Btn.MouseButton1Click:Connect(function()
     yoshiTask23Running = not yoshiTask23Running
     if yoshiTask23Running then
-        yoshiTask23Btn.Text = "停止"; yoshiTask23Btn.BackgroundColor3 = THEME.red
-        rY1.BackgroundColor3 = Color3.fromRGB(20, 18, 5)
+        setThemedBtnActive(yoshiTask23Btn, true); yoshiTask23Btn.Text = "停止"
+        rY1.BackgroundColor3 = THEME.activeRow
         activeFeatures["耀2/3任務"] = true; updateStatus()
 
         yoshiTask23Thread = trackThread(task.spawn(function()
@@ -650,10 +751,8 @@ yoshiTask23Btn.MouseButton1Click:Connect(function()
                 if not target or not target.Character then
                     yoshiTask23StatusLabel.Text = "找不到目標，等待中…"
                     yoshiTask23StatusLabel.TextColor3 = THEME.textMuted
-                    task.wait(0.5)
-                    continue
+                    task.wait(0.5); continue
                 end
-
                 local targetChar = target.Character
                 local torso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("UpperTorso")
                 if not torso then task.wait(0.3); continue end
@@ -661,41 +760,32 @@ yoshiTask23Btn.MouseButton1Click:Connect(function()
                 yoshiTask23StatusLabel.Text = "攻擊: " .. target.Name
                 yoshiTask23StatusLabel.TextColor3 = THEME.accent
 
-                -- 打一下
                 pcall(function()
                     ReplicatedStorage.GeneralHit:FireServer(
-                        Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso")
-                        or torso
+                        Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso") or torso
                     )
                 end)
-
-                -- 耀西能力（無參數）
                 pcall(function() ReplicatedStorage.Events.EgglerRAbility:FireServer() end)
                 task.wait(0.5)
                 pcall(function() ReplicatedStorage.Events.EgglerRAbility:FireServer() end)
 
-                -- 等目標起身
                 yoshiTask23StatusLabel.Text = "等待 " .. target.Name .. " 起身"
                 yoshiTask23StatusLabel.TextColor3 = THEME.textMuted
                 waitNotRagdoll(function()
                     return Players:FindFirstChild(target.Name) and Players[target.Name].Character
                 end)
-
                 if not yoshiTask23Running then break end
 
-                -- 再打一下
                 targetChar = target.Character
                 if not targetChar then task.wait(0.2); continue end
                 torso = targetChar:FindFirstChild("Torso") or targetChar:FindFirstChild("UpperTorso")
                 if torso then
                     pcall(function()
                         ReplicatedStorage.GeneralHit:FireServer(
-                            Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso")
-                            or torso
+                            Workspace[target.Name] and Workspace[target.Name]:FindFirstChild("Torso") or torso
                         )
                     end)
                 end
-
                 task.wait(0.05)
             end
             resetYoshiTask23()
@@ -708,23 +798,14 @@ end)
 -- ── 耀西 第一、四任務 ──────────────────────────────────────
 local rY2 = makeRow(p2, 2, 56)
 makeLabel(rY2, "第一、四任務:", 6, 2, 100, 20, 11, THEME.textSub)
-local yoshiTask14StatusLabel = Instance.new("TextLabel")
-yoshiTask14StatusLabel.Size = UDim2.new(0, 160, 0, 16)
-yoshiTask14StatusLabel.Position = UDim2.new(0, 6, 0, 34)
-yoshiTask14StatusLabel.BackgroundTransparency = 1
-yoshiTask14StatusLabel.Text = "未啟動"
-yoshiTask14StatusLabel.TextSize = 10; yoshiTask14StatusLabel.Font = Enum.Font.Gotham
-yoshiTask14StatusLabel.TextColor3 = THEME.textMuted
-yoshiTask14StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-yoshiTask14StatusLabel.Parent = rY2
+local yoshiTask14StatusLabel = makeStatusLabel(rY2, 6, 34, 200)
 local yoshiTask14Btn = makeButton(rY2, "啟動", 210, 16, 42, 24)
-
 local yoshiTask14LastFire = 0
 
 local function resetYoshiTask14()
     yoshiTask14Running = false
     if yoshiTask14Thread then pcall(function() task.cancel(yoshiTask14Thread) end); yoshiTask14Thread = nil end
-    yoshiTask14Btn.Text = "啟動"; yoshiTask14Btn.BackgroundColor3 = THEME.primary
+    setThemedBtnActive(yoshiTask14Btn, false); yoshiTask14Btn.Text = "啟動"
     rY2.BackgroundColor3 = THEME.bgRow
     yoshiTask14StatusLabel.Text = "未啟動"; yoshiTask14StatusLabel.TextColor3 = THEME.textMuted
     activeFeatures["耀1/4任務"] = false; updateStatus()
@@ -733,8 +814,8 @@ end
 yoshiTask14Btn.MouseButton1Click:Connect(function()
     yoshiTask14Running = not yoshiTask14Running
     if yoshiTask14Running then
-        yoshiTask14Btn.Text = "停止"; yoshiTask14Btn.BackgroundColor3 = THEME.red
-        rY2.BackgroundColor3 = Color3.fromRGB(20, 18, 5)
+        setThemedBtnActive(yoshiTask14Btn, true); yoshiTask14Btn.Text = "停止"
+        rY2.BackgroundColor3 = THEME.activeRow
         activeFeatures["耀1/4任務"] = true; updateStatus()
 
         yoshiTask14Thread = trackThread(task.spawn(function()
@@ -742,22 +823,17 @@ yoshiTask14Btn.MouseButton1Click:Connect(function()
                 local char = player.Character
                 local hrp  = char and char:FindFirstChild("HumanoidRootPart")
                 if hrp then
-                    -- 偵測前方 10 單位內有無玩家
                     local forward = hrp.CFrame.LookVector
                     local myPos   = hrp.Position
                     local found   = false
                     for _, p in ipairs(Players:GetPlayers()) do
                         if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
-                            local pPos = p.Character.HumanoidRootPart.Position
-                            local diff = pPos - myPos
-                            -- 距離 ≤ 10 且大致在前方（dot > 0）
+                            local diff = p.Character.HumanoidRootPart.Position - myPos
                             if diff.Magnitude <= 10 and diff.Unit:Dot(forward) > 0.1 then
-                                found = true
-                                break
+                                found = true; break
                             end
                         end
                     end
-
                     if found then
                         local now = tick()
                         if now - yoshiTask14LastFire >= 3 then
@@ -775,7 +851,7 @@ yoshiTask14Btn.MouseButton1Click:Connect(function()
                         yoshiTask14StatusLabel.TextColor3 = THEME.textMuted
                     end
                 end
-                task.wait(0.05)  -- 偵測頻率高，冷卻由 tick() 控制
+                task.wait(0.05)
             end
             resetYoshiTask14()
         end))
@@ -783,6 +859,22 @@ yoshiTask14Btn.MouseButton1Click:Connect(function()
         resetYoshiTask14()
     end
 end)
+
+-- ── 耀西 幫助者 ──────────────────────────────────────────────
+local rYH = makeRow(p2, 3, 56)
+makeLabel(rYH, "幫助者:", 6, 2, 50, 20, 11, THEME.textSub)
+local yoshiHelpInput     = makeInput(rYH, "玩家名", 58, 6, 78, 22)
+local yoshiHelpDistInput = makeInput(rYH, "5",     140, 6, 32, 22)
+yoshiHelpDistInput.Text  = "5"
+makeLabel(rYH, "格", 176, 6, 18, 22, 10, THEME.textMuted)
+local yoshiHelpBtn       = makeButton(rYH, "啟動", 196, 6, 44, 22)
+local yoshiHelpStatus    = makeStatusLabel(rYH, 6, 34, 240)
+
+makeHelpRunner(
+    "耀幫助者", yoshiHelpStatus, rYH, yoshiHelpBtn,
+    function() return math.max(1, tonumber(yoshiHelpDistInput.Text) or 5) end,
+    function() return findPlayerByPartialName(yoshiHelpInput.Text) end
+)
 
 -- ============================================================
 -- 頁面3：其他
@@ -802,7 +894,7 @@ local function resetFixPos()
     fixPosRunning = false
     if fixPosThread then pcall(function() task.cancel(fixPosThread) end); fixPosThread = nil end
     fixPosSaved = nil
-    fixPosBtn.Text = "啟動"; fixPosBtn.BackgroundColor3 = THEME.primary
+    setThemedBtnActive(fixPosBtn, false); fixPosBtn.Text = "啟動"
     r31.BackgroundColor3 = THEME.bgRow
     activeFeatures["固定位置"] = false; updateStatus()
 end
@@ -816,8 +908,8 @@ fixPosBtn.MouseButton1Click:Connect(function()
         if not hrp then return end
         fixPosSaved = hrp.CFrame
         fixPosRunning = true
-        fixPosBtn.Text = "解除"; fixPosBtn.BackgroundColor3 = THEME.red
-        r31.BackgroundColor3 = Color3.fromRGB(14, 5, 26)
+        setThemedBtnActive(fixPosBtn, true); fixPosBtn.Text = "解除"
+        r31.BackgroundColor3 = THEME.activeRow
         activeFeatures["固定位置"] = true; updateStatus()
         fixPosThread = trackThread(task.spawn(function()
             while fixPosRunning do
@@ -831,19 +923,9 @@ fixPosBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ── 3-2 幫助模式 ──────────────────────────────────────────
--- 說明：開啟後，當 workspace 中離自己最近的 egg_victim 在 30 單位內時
---       才觸發重置（SelfKnockback），否則不動作
 local r32 = makeRow(p3, 2, 56)
 makeLabel(r32, "幫助模式:", 6, 2, 90, 20, 11, THEME.textSub)
-local helpModeStatusLabel = Instance.new("TextLabel")
-helpModeStatusLabel.Size = UDim2.new(0, 160, 0, 16)
-helpModeStatusLabel.Position = UDim2.new(0, 6, 0, 34)
-helpModeStatusLabel.BackgroundTransparency = 1
-helpModeStatusLabel.Text = "未啟動"
-helpModeStatusLabel.TextSize = 10; helpModeStatusLabel.Font = Enum.Font.Gotham
-helpModeStatusLabel.TextColor3 = THEME.textMuted
-helpModeStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-helpModeStatusLabel.Parent = r32
+local helpModeStatusLabel = makeStatusLabel(r32, 6, 34, 220)
 local helpModeBtn = makeButton(r32, "啟動", 210, 16, 42, 24)
 
 local helpModeRunning = false
@@ -852,7 +934,7 @@ local helpModeThread  = nil
 local function resetHelpMode()
     helpModeRunning = false
     if helpModeThread then pcall(function() task.cancel(helpModeThread) end); helpModeThread = nil end
-    helpModeBtn.Text = "啟動"; helpModeBtn.BackgroundColor3 = THEME.primary
+    setThemedBtnActive(helpModeBtn, false); helpModeBtn.Text = "啟動"
     r32.BackgroundColor3 = THEME.bgRow
     helpModeStatusLabel.Text = "未啟動"; helpModeStatusLabel.TextColor3 = THEME.textMuted
     activeFeatures["幫助模式"] = false; updateStatus()
@@ -861,8 +943,8 @@ end
 helpModeBtn.MouseButton1Click:Connect(function()
     helpModeRunning = not helpModeRunning
     if helpModeRunning then
-        helpModeBtn.Text = "停止"; helpModeBtn.BackgroundColor3 = THEME.red
-        r32.BackgroundColor3 = Color3.fromRGB(14, 5, 26)
+        setThemedBtnActive(helpModeBtn, true); helpModeBtn.Text = "停止"
+        r32.BackgroundColor3 = THEME.activeRow
         activeFeatures["幫助模式"] = true; updateStatus()
 
         helpModeThread = trackThread(task.spawn(function()
@@ -891,65 +973,50 @@ helpModeBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── 3-3 自動攻擊（Slap Aura 偵測模式） ──────────────────────
--- 偵測到 __namecall FireServer 事件後，等最近目標不 ragdoll，再等 0.8 秒自動打一次
+-- ── 3-3 自動攻擊 ──────────────────────────────────────────
 local r33 = makeRow(p3, 3, 56)
 makeLabel(r33, "自動攻擊:", 6, 2, 90, 20, 11, THEME.textSub)
-local autoAtkStatusLabel = Instance.new("TextLabel")
-autoAtkStatusLabel.Size = UDim2.new(0, 160, 0, 16)
-autoAtkStatusLabel.Position = UDim2.new(0, 6, 0, 34)
-autoAtkStatusLabel.BackgroundTransparency = 1
-autoAtkStatusLabel.Text = "未啟動（需先手動打一次以偵測）"
-autoAtkStatusLabel.TextSize = 10; autoAtkStatusLabel.Font = Enum.Font.Gotham
-autoAtkStatusLabel.TextColor3 = THEME.textMuted
-autoAtkStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-autoAtkStatusLabel.Parent = r33
+local autoAtkStatusLabel = makeStatusLabel(r33, 6, 34, 230)
+autoAtkStatusLabel.Text = "未啟動（先手動打一次）"
 local autoAtkBtn = makeButton(r33, "啟動", 210, 16, 42, 24)
 
-local autoAtkRunning = false
-local autoAtkDetectedEvents = {}  -- { event, args }
-local autoAtkPending = false      -- 是否有一次待觸發
-local autoAtkHookSet = false
+local autoAtkRunning       = false
+local autoAtkDetectedEvents = {}
+local autoAtkPending        = false
+local autoAtkHookSet        = false
 
--- Hook（全域只設一次）
 local _auraNC
 local function setupAutoAtkHook()
     if autoAtkHookSet then return end
     autoAtkHookSet = true
     _auraNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
-        local method = getnamecallmethod()
+        local method  = getnamecallmethod()
         local results = table.pack(_auraNC(self, ...))
         if autoAtkRunning and method == "FireServer" then
             local ok, cls = pcall(function() return self.ClassName end)
             if ok and cls == "RemoteEvent" then
                 local args = {...}
-                local isHitEvent = false
-                -- 偵測：args 裡有 BasePart 屬於其他玩家的角色
+                local isHit = false
                 for _, v in ipairs(args) do
                     if typeof(v) == "Instance" then
                         if v:IsA("BasePart") then
-                            local parentModel = v.Parent
-                            if parentModel then
-                                for _, p in ipairs(Players:GetPlayers()) do
-                                    if p ~= player and p.Character == parentModel then
-                                        isHitEvent = true; break
-                                    end
+                            for _, p in ipairs(Players:GetPlayers()) do
+                                if p ~= player and p.Character == v.Parent then
+                                    isHit = true; break
                                 end
                             end
                         end
-                        if v:IsA("Player") and v ~= player then isHitEvent = true; break end
-                        if v:IsA("Model") and v ~= player.Character then
-                            if v:FindFirstChildOfClass("Humanoid") then isHitEvent = true; break end
+                        if v:IsA("Player") and v ~= player then isHit = true end
+                        if v:IsA("Model") and v ~= player.Character and v:FindFirstChildOfClass("Humanoid") then
+                            isHit = true
                         end
                     end
+                    if isHit then break end
                 end
-                if isHitEvent then
-                    -- 更新或新增事件記錄
+                if isHit then
                     local found = false
                     for _, entry in ipairs(autoAtkDetectedEvents) do
-                        if entry.event == self then
-                            entry.args = args; found = true; break
-                        end
+                        if entry.event == self then entry.args = args; found = true; break end
                     end
                     if not found then
                         table.insert(autoAtkDetectedEvents, {event = self, args = args})
@@ -963,19 +1030,15 @@ local function setupAutoAtkHook()
 end
 pcall(setupAutoAtkHook)
 
--- Heartbeat：偵測到 pending 後，等目標不 ragdoll，再等 0.8 秒，打
 RunService.Heartbeat:Connect(function()
-    if not autoAtkRunning then return end
-    if not autoAtkPending then return end
+    if not autoAtkRunning or not autoAtkPending then return end
     if #autoAtkDetectedEvents == 0 then autoAtkPending = false; return end
     autoAtkPending = false
 
     task.spawn(function()
-        -- 找最近目標
         local target = getNearestPlayer()
         if not target then return end
 
-        -- 等目標不 ragdoll
         autoAtkStatusLabel.Text = "等 " .. target.Name .. " 起身…"
         autoAtkStatusLabel.TextColor3 = THEME.textMuted
         waitNotRagdoll(function()
@@ -983,15 +1046,12 @@ RunService.Heartbeat:Connect(function()
         end, 6)
 
         if not autoAtkRunning then return end
-
         task.wait(0.8)
-
         if not autoAtkRunning then return end
 
         autoAtkStatusLabel.Text = "自動攻擊中！"
         autoAtkStatusLabel.TextColor3 = THEME.green
 
-        -- 對每個偵測到的事件，替換目標後發送
         target = getNearestPlayer()
         if not target or not target.Character then return end
 
@@ -1002,8 +1062,8 @@ RunService.Heartbeat:Connect(function()
                 local didReplace = false
                 if typeof(v) == "Instance" and not replaced then
                     if v:IsA("BasePart") then
-                        local newPart = target.Character and target.Character:FindFirstChild(v.Name) or v
-                        table.insert(newArgs, newPart); didReplace = true; replaced = true
+                        table.insert(newArgs, target.Character and target.Character:FindFirstChild(v.Name) or v)
+                        didReplace = true; replaced = true
                     elseif v:IsA("Player") and v ~= player then
                         table.insert(newArgs, target); didReplace = true; replaced = true
                     elseif v:IsA("Model") and v:FindFirstChildOfClass("Humanoid") and v ~= player.Character then
@@ -1023,12 +1083,10 @@ RunService.Heartbeat:Connect(function()
 end)
 
 local function resetAutoAtk()
-    autoAtkRunning = false
-    autoAtkPending = false
-    autoAtkDetectedEvents = {}
-    autoAtkBtn.Text = "啟動"; autoAtkBtn.BackgroundColor3 = THEME.primary
+    autoAtkRunning = false; autoAtkPending = false; autoAtkDetectedEvents = {}
+    setThemedBtnActive(autoAtkBtn, false); autoAtkBtn.Text = "啟動"
     r33.BackgroundColor3 = THEME.bgRow
-    autoAtkStatusLabel.Text = "未啟動（需先手動打一次以偵測）"
+    autoAtkStatusLabel.Text = "未啟動（先手動打一次）"
     autoAtkStatusLabel.TextColor3 = THEME.textMuted
     activeFeatures["自動攻擊"] = false; updateStatus()
 end
@@ -1036,12 +1094,11 @@ end
 autoAtkBtn.MouseButton1Click:Connect(function()
     autoAtkRunning = not autoAtkRunning
     if autoAtkRunning then
-        autoAtkBtn.Text = "停止"; autoAtkBtn.BackgroundColor3 = THEME.red
-        r33.BackgroundColor3 = Color3.fromRGB(14, 5, 26)
+        setThemedBtnActive(autoAtkBtn, true); autoAtkBtn.Text = "停止"
+        r33.BackgroundColor3 = THEME.activeRow
         autoAtkStatusLabel.Text = "等待首次事件（請手動打一次）"
         autoAtkStatusLabel.TextColor3 = THEME.accent
-        autoAtkDetectedEvents = {}
-        autoAtkPending = false
+        autoAtkDetectedEvents = {}; autoAtkPending = false
         activeFeatures["自動攻擊"] = true; updateStatus()
     else
         resetAutoAtk()
@@ -1059,27 +1116,28 @@ local fontSizeInput = makeInput(rInfoFont, "12", 88, 6, 60)
 fontSizeInput.Text = "12"
 
 local EXPLAIN_TEXT =
+    "【薩諾斯 / 耀西 - 幫助者】\n" ..
+    "輸入攻擊者玩家名（支援前綴匹配），設定距離（預設5格）後啟動。\n" ..
+    "持續將自己傳送到攻擊者正前方指定格數，讓對方能打到自己。\n" ..
+    "只要偵測到 Workspace 裡的 egg_victim 在自己 30 單位內，才觸發 SelfKnockback 重置分身；" ..
+    "沒有 egg_victim 在範圍內則只維持位置，不做任何重置。\n\n" ..
     "【薩諾斯 - 第一、三任務】\n" ..
     "找最近的玩家，發送 GeneralHit 打一下，接著 GeneralAbility(1) 後等 0.5 秒發 GeneralAbility(2)。" ..
-    "等目標不處於 ragdoll 狀態後，再打一次 GeneralHit，如此循環。\n\n" ..
+    "等目標不處於 ragdoll 後，再打一次 GeneralHit，如此循環。\n\n" ..
     "【薩諾斯 - 第二任務】\n" ..
-    "等自己不 ragdoll 後，發動 GeneralAbility(1)，再等自己進入 ragdoll、" ..
-    "起身後，發動 GeneralAbility(2)，循環。\n\n" ..
+    "等自己不 ragdoll 後發動 GeneralAbility(1)，再等自己進入 ragdoll 並起身後，" ..
+    "發動 GeneralAbility(2)，循環。\n\n" ..
     "【耀西 - 第二、三任務】\n" ..
-    "邏輯同薩諾斯第一三任務，但能力換成 Events.EgglerRAbility（無參數）。\n\n" ..
+    "邏輯同薩諾斯第一三任務，能力換成 Events.EgglerRAbility（無參數，打兩次）。\n\n" ..
     "【耀西 - 第一、四任務】\n" ..
-    "偵測自己正前方 10 單位內有無玩家，有則發動 GeneralAbility()，" ..
-    "能力冷卻 3 秒，偵測本身不受冷卻限制，高頻率持續掃描。\n\n" ..
+    "偵測自己正前方 10 單位內有無玩家，有則發動 GeneralAbility()，能力冷卻 3 秒，偵測不受冷卻。\n\n" ..
     "【其他 - 固定位置】\n" ..
-    "啟動時記錄當前位置，持續將 HumanoidRootPart 的 CFrame 設為該位置。\n\n" ..
+    "啟動時記錄當前位置，持續鎖定 HumanoidRootPart CFrame 在該位置。\n\n" ..
     "【其他 - 幫助模式】\n" ..
-    "偵測 Workspace 中所有名稱含 egg_victim 的物件，找到離自己 30 單位內" ..
-    "最近的一個時，觸發 SelfKnockback 重置分身。若無 egg_victim 在範圍內，" ..
-    "則不動作（不會主動重置）。\n\n" ..
+    "偵測 Workspace 中的 egg_victim，在 30 單位內才觸發 SelfKnockback 重置分身。\n\n" ..
     "【其他 - 自動攻擊】\n" ..
-    "透過 __namecall hook 偵測遊戲自身觸發的、目標為其他玩家的 FireServer 事件。" ..
-    "偵測到後，等最近的目標不處於 ragdoll 狀態，再等 0.8 秒，自動以相同" ..
-    "RemoteEvent 和替換後的目標參數發送一次攻擊。需先手動打一次以讓腳本學習事件。"
+    "透過 __namecall hook 偵測遊戲觸發的攻擊事件，偵測到後等最近目標不 ragdoll，" ..
+    "再等 0.8 秒自動重發一次。需先手動打一次讓腳本學習事件。"
 
 local textRow = makeRow(p4, 2, 10)
 textRow.AutomaticSize = Enum.AutomaticSize.None
@@ -1098,16 +1156,13 @@ explainLabel.Parent = textRow
 local function refreshExplainHeight()
     task.defer(function()
         local bounds = game:GetService("TextService"):GetTextSize(
-            explainLabel.Text,
-            explainLabel.TextSize,
-            explainLabel.Font,
+            explainLabel.Text, explainLabel.TextSize, explainLabel.Font,
             Vector2.new(explainLabel.AbsoluteSize.X > 10 and explainLabel.AbsoluteSize.X or 240, math.huge)
         )
         explainLabel.Size = UDim2.new(1, -12, 0, bounds.Y)
         textRow.Size = UDim2.new(1, 0, 0, bounds.Y + 14)
     end)
 end
-
 task.delay(0.1, refreshExplainHeight)
 
 fontSizeInput.FocusLost:Connect(function()
@@ -1119,22 +1174,15 @@ fontSizeInput.FocusLost:Connect(function()
 end)
 
 -- ============================================================
--- 分頁切換（含主題切換）
+-- 分頁切換
 -- ============================================================
 local function switchTab(n)
     for i, p in ipairs(pages) do p.Visible = (i == n) end
-
-    -- 套用對應主題
-    local themeKey = tabThemeKeys[n]
-    applyTheme(THEMES[themeKey])
-
-    -- 更新 tab 按鈕顏色
+    applyTheme(THEMES[tabThemeKeys[n]])
     for i, tb in ipairs(tabButtons) do
         tb.BackgroundColor3 = (i == n) and THEME.tabActive or THEME.tabBg
         tb.TextColor3       = (i == n) and THEME.textMain  or THEME.textMuted
     end
-
-    -- 更新各行顏色（已開啟的行維持活躍顏色，未開啟的用新主題色）
     statusLabel.TextColor3 = THEME.primary
     updateStatus()
 end
@@ -1142,7 +1190,7 @@ end
 for i, tb in ipairs(tabButtons) do
     tb.MouseButton1Click:Connect(function() switchTab(i) end)
 end
-switchTab(1)  -- 預設薩諾斯分頁
+switchTab(1)
 
 -- ============================================================
 -- 拖曳
@@ -1186,13 +1234,13 @@ Instance.new("UICorner", miniFrame).CornerRadius = UDim.new(0, 6)
 local miniStroke = Instance.new("UIStroke")
 miniStroke.Color = THEME.primaryDark; miniStroke.Thickness = 1.5; miniStroke.Parent = miniFrame
 local miniTitle = Instance.new("TextLabel")
-miniTitle.Text = "精通刷取"; miniTitle.Size = UDim2.new(1, -36, 1, 0)
+miniTitle.Text = "薩諾斯、耀西精通"; miniTitle.Size = UDim2.new(1, -36, 1, 0)
 miniTitle.BackgroundTransparency = 1; miniTitle.Font = Enum.Font.GothamBold
-miniTitle.TextSize = 13; miniTitle.TextColor3 = THEME.accent; miniTitle.Parent = miniFrame
+miniTitle.TextSize = 12; miniTitle.TextColor3 = THEME.accent; miniTitle.Parent = miniFrame
 local expandBtn = Instance.new("TextButton")
 expandBtn.Text = "+"; expandBtn.Size = UDim2.new(0, 24, 0, 24)
 expandBtn.Position = UDim2.new(1, -28, 0, 4)
-expandBtn.BackgroundColor3 = THEME.primary
+expandBtn.BackgroundColor3 = THEME.primary  -- 縮小列不加入追蹤，保持預設
 expandBtn.TextColor3 = Color3.fromRGB(255,255,255)
 expandBtn.Font = Enum.Font.GothamBold; expandBtn.TextSize = 14
 expandBtn.Parent = miniFrame
@@ -1209,4 +1257,4 @@ closeBtn.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的精通刷取腳本 v1.0 已載入！")
+print("貓玲的薩諾斯、耀西精通腳本 v1.1 已載入！")
