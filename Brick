@@ -48,23 +48,29 @@ local THEME = {
     statusBg    = Color3.fromRGB( 20,   6,   6),
 }
 
--- 尋找最近的櫻桃分身（任意玩家）
-local function findNearestCherryClone()
+-- 尋找最近的櫻桃分身 HumanoidRootPart（名稱以 "Cherry " 開頭的模型）
+local function findNearestCherryHRP()
     local char = player.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
     local myPos = char.HumanoidRootPart.Position
-    local cherryStorage = Workspace:FindFirstChild("cherry_storage")
-    if not cherryStorage then return nil end
 
     local nearest, minDist = nil, math.huge
-    for _, child in pairs(cherryStorage:GetChildren()) do
-        local cherry = child:FindFirstChild("Cherry")
-        local glove = cherry and cherry:FindFirstChild("Glove")
-        if glove and glove.Parent then
-            local d = (glove.Position - myPos).Magnitude
-            if d < minDist then
-                minDist = d
-                nearest = glove
+    -- 同時搜尋 Workspace 根層與 cherry_storage
+    local containers = {Workspace}
+    local cs = Workspace:FindFirstChild("cherry_storage")
+    if cs then table.insert(containers, cs) end
+
+    for _, container in ipairs(containers) do
+        for _, child in pairs(container:GetChildren()) do
+            if child.Name:sub(1, 7) == "Cherry " then
+                local hrp = child:FindFirstChild("HumanoidRootPart")
+                if hrp and hrp.Parent then
+                    local d = (hrp.Position - myPos).Magnitude
+                    if d < minDist then
+                        minDist = d
+                        nearest = hrp
+                    end
+                end
             end
         end
     end
@@ -430,36 +436,54 @@ end)
 --   刷精通開啟 → 找最近分身 → 傳送到分身前方並面對 → FireServer lbrick
 --             → 找不到分身則暫停等待
 -- ============================================================
+-- 在指定 CFrame 持續鎖定玩家位置，直到 stopTick 或 toggles.autoBrick 變 false
+local function holdPosition(hrp, lockCFrame, stopTick)
+    while toggles.autoBrick and tick() < stopTick do
+        pcall(function() hrp.CFrame = lockCFrame end)
+        task.wait()
+    end
+end
+
 local function runBrickLoop()
     while toggles.autoBrick do
         local interval = values.brickInterval
 
         if toggles.masterMode then
-            local glove = findNearestCherryClone()
-            if glove and glove.Parent then
-                pcall(function()
-                    local char = player.Character
-                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                    if not hrp then return end
-                    local glovePos = glove.Position
-                    -- 站在分身前方2格並面向分身
-                    local offset = (hrp.Position - glovePos).Unit * 2
-                    local standPos = glovePos + offset
-                    hrp.CFrame = CFrame.new(standPos, glovePos)
-                end)
-                task.wait(0.05)
-                pcall(function()
-                    ReplicatedStorage.lbrick:FireServer()
-                end)
-                task.wait(interval)
+            local targetHRP = findNearestCherryHRP()
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+
+            if targetHRP and targetHRP.Parent and hrp then
+                -- 計算正上方7單位並面向分身
+                local tPos = targetHRP.Position
+                local standCF = CFrame.new(tPos + Vector3.new(0, 7, 0), tPos)
+
+                -- 移動過去並鎖定 0.5 秒
+                pcall(function() hrp.CFrame = standCF end)
+                holdPosition(hrp, standCF, tick() + 0.5)
+                if not toggles.autoBrick then break end
+
+                -- 放積木
+                pcall(function() ReplicatedStorage.lbrick:FireServer() end)
+
+                -- 鎖定 1.5 秒後再找下一個分身
+                holdPosition(hrp, standCF, tick() + 1.5)
+
             else
-                -- 沒有分身，暫停
-                task.wait(0.3)
+                -- 沒有分身：鎖在原地等待直到有分身出現
+                if hrp then
+                    local holdCF = hrp.CFrame
+                    while toggles.autoBrick and toggles.masterMode do
+                        pcall(function() hrp.CFrame = holdCF end)
+                        task.wait()
+                        if findNearestCherryHRP() then break end
+                    end
+                else
+                    task.wait(0.3)
+                end
             end
         else
-            pcall(function()
-                ReplicatedStorage.lbrick:FireServer()
-            end)
+            pcall(function() ReplicatedStorage.lbrick:FireServer() end)
             task.wait(interval)
         end
     end
