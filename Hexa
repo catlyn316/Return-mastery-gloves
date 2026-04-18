@@ -1,4 +1,4 @@
--- 貓玲的六角精通腳本 v0.1
+-- 貓玲的六角精通腳本 v0.2
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -483,6 +483,9 @@ descLabel.AutomaticSize = Enum.AutomaticSize.Y
 descLabel.BackgroundTransparency = 1
 descLabel.TextWrapped = true
 descLabel.Text =
+"【進門提示】\n" ..
+"只有幫助者要進紅門再到安全區\n" ..
+"攻擊者可以直接進安全區\n\n" ..
 "【第一任務、第三任務】\n" ..
 "攻擊者：只用能力\n" ..
 "幫助者：被打後重置\n\n" ..
@@ -559,7 +562,7 @@ end)
 
 -- ============================================================
 -- 攻擊者主邏輯
--- 打+能力：每攻擊間隔秒 GeneralHit → 等0.5s → GeneralAbility → 等能力間隔秒 → 重複
+-- 打+能力：每攻擊間隔秒 GeneralHit → 等1s → GeneralAbility → 等能力間隔秒 → 重複
 -- 只用能力：每能力間隔秒 GeneralAbility → 重複
 -- 每次循環前先確認 20 單位內有人，否則暫停等待
 -- ============================================================
@@ -578,7 +581,7 @@ local function runAttackerLoop()
             if torso then
                 pcall(function() ReplicatedStorage.GeneralHit:FireServer(torso) end)
             end
-            task.wait(0.5)
+            task.wait(1.0)
             if not toggles.attacker then break end
             pcall(function() ReplicatedStorage.GeneralAbility:FireServer() end)
             task.wait(values.abilityInterval)
@@ -979,4 +982,4 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的六角精通腳本 v0.1 已載入!")
+print("貓玲的六角精通腳本 v0.2已載入!")
