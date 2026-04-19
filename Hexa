@@ -462,46 +462,38 @@ local fixedPosHelpFrame, fixedPosHelpStatus, fixedPosHelpButton = createRow(page
 -- ============================================================
 -- 頁面3：說明
 -- ============================================================
-local descFrame = Instance.new("Frame")
-descFrame.Size = UDim2.new(1, 0, 0, 0)
-descFrame.AutomaticSize = Enum.AutomaticSize.Y
-descFrame.BackgroundColor3 = THEME.bgRow
-descFrame.LayoutOrder = 1
-descFrame.Parent = page3
-Instance.new("UICorner", descFrame).CornerRadius = UDim.new(0, 6)
+local hexTextRow = Instance.new("Frame")
+hexTextRow.Size = UDim2.new(1, 0, 0, 300)
+hexTextRow.BackgroundColor3 = THEME.bgRow
+hexTextRow.LayoutOrder = 1
+hexTextRow.Parent = page3
+Instance.new("UICorner", hexTextRow).CornerRadius = UDim.new(0, 6)
 
-local descPad = Instance.new("UIPadding")
-descPad.PaddingTop    = UDim.new(0, 8)
-descPad.PaddingBottom = UDim.new(0, 8)
-descPad.PaddingLeft   = UDim.new(0, 8)
-descPad.PaddingRight  = UDim.new(0, 8)
-descPad.Parent = descFrame
-
-local descLabel = Instance.new("TextLabel")
-descLabel.Size = UDim2.new(1, 0, 0, 0)
-descLabel.AutomaticSize = Enum.AutomaticSize.Y
-descLabel.BackgroundTransparency = 1
-descLabel.TextWrapped = true
-descLabel.Text =
-"【進門提示】\n" ..
-"只有幫助者要進紅門再到安全區\n" ..
-"攻擊者可以直接進安全區\n\n" ..
-"【第一任務、第三任務】\n" ..
-"攻擊者：只用能力\n" ..
-"幫助者：被打後重置\n\n" ..
-"【第二任務】\n" ..
-"攻擊者：打+能力\n" ..
-"幫助者：被打後不重置\n\n" ..
-"【第四任務】\n" ..
-"攻擊者：只用能力\n" ..
-"幫助者：被打後不重置（同第二任務）"
-descLabel.TextSize = 12
-descLabel.Font = Enum.Font.Gotham
-descLabel.TextColor3 = THEME.textMain
-descLabel.TextXAlignment = Enum.TextXAlignment.Left
-descLabel.TextYAlignment = Enum.TextYAlignment.Top
-descLabel.LineHeight = 1.3
-descLabel.Parent = descFrame
+local hexExplainLabel = Instance.new("TextLabel")
+hexExplainLabel.Size = UDim2.new(1, -16, 1, -16)
+hexExplainLabel.Position = UDim2.new(0, 8, 0, 8)
+hexExplainLabel.BackgroundTransparency = 1
+hexExplainLabel.Text =
+    "【進門提示】\n" ..
+    "只有幫助者要進紅門再到安全區\n" ..
+    "攻擊者可以直接進安全區\n\n" ..
+    "【第一任務、第三任務】\n" ..
+    "攻擊者：只用能力\n" ..
+    "幫助者：被打後重置\n\n" ..
+    "【第二任務】\n" ..
+    "攻擊者：打+能力\n" ..
+    "幫助者：被打後不重置\n\n" ..
+    "【第四任務】\n" ..
+    "攻擊者：只用能力\n" ..
+    "幫助者：被打後不重置（同第二任務）"
+hexExplainLabel.TextSize = 12
+hexExplainLabel.Font = Enum.Font.Gotham
+hexExplainLabel.TextColor3 = THEME.textMain
+hexExplainLabel.TextXAlignment = Enum.TextXAlignment.Left
+hexExplainLabel.TextYAlignment = Enum.TextYAlignment.Top
+hexExplainLabel.TextWrapped = true
+hexExplainLabel.LineHeight = 1.3
+hexExplainLabel.Parent = hexTextRow
 
 -- ============================================================
 -- 狀態標籤
@@ -562,9 +554,6 @@ end)
 
 -- ============================================================
 -- 攻擊者主邏輯
--- 打+能力：每攻擊間隔秒 GeneralHit → 等1s → GeneralAbility → 等能力間隔秒 → 重複
--- 只用能力：每能力間隔秒 GeneralAbility → 重複
--- 每次循環前先確認 20 單位內有人，否則暫停等待
 -- ============================================================
 local function runAttackerLoop()
     while toggles.attacker do
@@ -835,7 +824,6 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 local lobbyStuck = false
                 local helpDone   = false
 
-                -- noTool 判定：每 0.1 秒，連續 0.5 秒無工具 → 觸發重傳
                 local noToolTimer = 0
                 local noToolLoop = task.spawn(function()
                     while not helpDone and toggles.helpTarget do
@@ -862,7 +850,6 @@ helpTargetButton.MouseButton1Click:Connect(function()
                     end
                 end)
 
-                -- 執行幫助 loop
                 if values.helpMode == "被打後不重置" then
                     local helpConn = task.spawn(function()
                         runHelpLoopNoReset(hrp, hum, tgt)
@@ -882,7 +869,6 @@ helpTargetButton.MouseButton1Click:Connect(function()
                 helpDone = true
                 task.cancel(noToolLoop)
 
-                -- noTool 觸發：傳回 Teleport1 再傳到目標位置（由外層 while 重新執行）
                 if lobbyStuck and toggles.helpTarget then
                     teleportToLobby(hrp)
                     task.wait(0.5)
