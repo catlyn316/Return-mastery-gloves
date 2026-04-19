@@ -462,10 +462,44 @@ local fixedPosHelpFrame, fixedPosHelpStatus, fixedPosHelpButton = createRow(page
 -- ============================================================
 -- 頁面3：說明
 -- ============================================================
+
+-- 字體大小列
+local hexFontRow = Instance.new("Frame")
+hexFontRow.Size = UDim2.new(1, 0, 0, 32)
+hexFontRow.BackgroundColor3 = THEME.bgRow
+hexFontRow.LayoutOrder = 1
+hexFontRow.Parent = page3
+Instance.new("UICorner", hexFontRow).CornerRadius = UDim.new(0, 6)
+
+local hexFontLabel = Instance.new("TextLabel")
+hexFontLabel.Size = UDim2.new(0, 80, 1, 0)
+hexFontLabel.Position = UDim2.new(0, 6, 0, 0)
+hexFontLabel.BackgroundTransparency = 1
+hexFontLabel.Text = "字體大小:"
+hexFontLabel.TextSize = 12
+hexFontLabel.Font = Enum.Font.GothamBold
+hexFontLabel.TextColor3 = THEME.textSub
+hexFontLabel.TextXAlignment = Enum.TextXAlignment.Left
+hexFontLabel.TextYAlignment = Enum.TextYAlignment.Center
+hexFontLabel.Parent = hexFontRow
+
+local hexFontInput = Instance.new("TextBox")
+hexFontInput.Size = UDim2.new(0, 60, 0, 22)
+hexFontInput.Position = UDim2.new(0, 88, 0, 5)
+hexFontInput.BackgroundColor3 = THEME.bgInput
+hexFontInput.BorderSizePixel = 1
+hexFontInput.BorderColor3 = THEME.primaryDark
+hexFontInput.Text = "12"
+hexFontInput.TextSize = 12
+hexFontInput.Font = Enum.Font.Gotham
+hexFontInput.TextColor3 = THEME.textMain
+hexFontInput.Parent = hexFontRow
+Instance.new("UICorner", hexFontInput).CornerRadius = UDim.new(0, 5)
+
 local hexTextRow = Instance.new("Frame")
 hexTextRow.Size = UDim2.new(1, 0, 0, 300)
 hexTextRow.BackgroundColor3 = THEME.bgRow
-hexTextRow.LayoutOrder = 1
+hexTextRow.LayoutOrder = 2
 hexTextRow.Parent = page3
 Instance.new("UICorner", hexTextRow).CornerRadius = UDim.new(0, 6)
 
@@ -494,6 +528,13 @@ hexExplainLabel.TextYAlignment = Enum.TextYAlignment.Top
 hexExplainLabel.TextWrapped = true
 hexExplainLabel.LineHeight = 1.3
 hexExplainLabel.Parent = hexTextRow
+
+hexFontInput.FocusLost:Connect(function()
+    local v = tonumber(hexFontInput.Text)
+    v = v and math.clamp(v, 8, 24) or 12
+    hexFontInput.Text = tostring(v)
+    hexExplainLabel.TextSize = v
+end)
 
 -- ============================================================
 -- 狀態標籤
