@@ -1,10 +1,11 @@
--- 貓玲的積木精通腳本 v1.2
+-- 貓玲的積木精通腳本 v2.0 修訂版
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 pcall(function() if CoreGui:FindFirstChild("BrickMasterUI") then CoreGui.BrickMasterUI:Destroy() end end)
@@ -17,9 +18,10 @@ pcall(function()
 end)
 
 local toggles = {
-    autoBrick   = false,
-    masterMode  = false,
-    autoAbility = false,
+    autoBrick = false,
+    flying = false,
+    positionLocked = false,
+    noclip = false,
 }
 
 local values = {
@@ -27,12 +29,18 @@ local values = {
 }
 
 local connections = {
-    autoBrick   = nil,
-    autoAbility = nil,
+    autoBrick = nil,
+    flying = nil,
+    positionLocked = nil,
+    noclip = nil,
 }
 
 local brickUseCount = 0
-local brickCountLabel = nil  -- 在 UI 建立後賦值
+local brickCountLabel = nil
+local originalPosition = nil
+local flySpeed = 1
+local ctrl = {f = 0, b = 0, l = 0, r = 0}
+local tpwalking = false
 
 local THEME = {
     primary     = Color3.fromRGB(200,  40,  40),
@@ -51,38 +59,161 @@ local THEME = {
     statusBg    = Color3.fromRGB( 20,   6,   6),
 }
 
--- 尋找最近的櫻桃分身 HumanoidRootPart（名稱以 "Cherry " 開頭的模型）
-local function findNearestCherryHRP()
-    local char = player.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-    local myPos = char.HumanoidRootPart.Position
-
-    local nearest, minDist = nil, math.huge
-    -- 同時搜尋 Workspace 根層與 cherry_storage
-    local containers = {Workspace}
-    local cs = Workspace:FindFirstChild("cherry_storage")
-    if cs then table.insert(containers, cs) end
-
-    for _, container in ipairs(containers) do
-        for _, child in pairs(container:GetChildren()) do
-            if child.Name:sub(1, 7) == "Cherry " then
-                local hrp = child:FindFirstChild("HumanoidRootPart")
-                if hrp and hrp.Parent then
-                    local d = (hrp.Position - myPos).Magnitude
-                    if d < minDist then
-                        minDist = d
-                        nearest = hrp
+local function startFlying()
+    pcall(function()
+        local char = player.Character
+        if not char then return end
+        
+        local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+        if not humanoid then return end
+        
+        char.Animate.Disabled = true
+        for _, track in pairs(humanoid:GetPlayingAnimationTracks()) do
+            track:AdjustSpeed(0)
+        end
+        
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Flying, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Landed, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Running, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.RunningNoPhysics, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.StrafingNoPhysics, false)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, false)
+        humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
+        
+        humanoid.PlatformStand = true
+        
+        for i = 1, flySpeed do
+            task.spawn(function() 
+                local hb = RunService.Heartbeat
+                tpwalking = true
+                local chr = player.Character
+                local hum = chr and chr:FindFirstChildWhichIsA("Humanoid")
+                while tpwalking and toggles.flying and hb:Wait() and chr and hum and hum.Parent do
+                    if hum.MoveDirection.Magnitude > 0 then
+                        chr:TranslateBy(hum.MoveDirection)
+                    end
+                end 
+            end)
+        end
+        
+        local torso = char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+        if not torso then return end
+        
+        local bg = Instance.new("BodyGyro", torso)
+        bg.P = 9e4
+        bg.maxTorque = Vector3.new(9e9, 9e9, 9e9)
+        bg.cframe = torso.CFrame
+        
+        local bv = Instance.new("BodyVelocity", torso)
+        bv.velocity = Vector3.new(0, 0.1, 0)
+        bv.maxForce = Vector3.new(9e9, 9e9, 9e9)
+        
+        local lastctrl = {f = 0, b = 0, l = 0, r = 0}
+        local maxspeed = 50
+        local speed = 0
+        
+        task.spawn(function()
+            while toggles.flying and char and torso and torso.Parent do
+                RunService.RenderStepped:Wait()
+                
+                if ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0 then
+                    speed = speed + 0.5 + (speed / maxspeed)
+                    if speed > maxspeed then
+                        speed = maxspeed
+                    end
+                elseif not (ctrl.l + ctrl.r ~= 0 or ctrl.f + ctrl.b ~= 0) and speed ~= 0 then
+                    speed = speed - 1
+                    if speed < 0 then
+                        speed = 0
                     end
                 end
+                
+                if (ctrl.l + ctrl.r) ~= 0 or (ctrl.f + ctrl.b) ~= 0 then
+                    bv.velocity = ((Workspace.CurrentCamera.CoordinateFrame.lookVector * (ctrl.f + ctrl.b)) + 
+                        ((Workspace.CurrentCamera.CoordinateFrame * CFrame.new(ctrl.l + ctrl.r, (ctrl.f + ctrl.b) * 0.2, 0).p) - 
+                        Workspace.CurrentCamera.CoordinateFrame.p)) * speed
+                    lastctrl = {f = ctrl.f, b = ctrl.b, l = ctrl.l, r = ctrl.r}
+                elseif (ctrl.l + ctrl.r) == 0 and (ctrl.f + ctrl.b) == 0 and speed ~= 0 then
+                    bv.velocity = ((Workspace.CurrentCamera.CoordinateFrame.lookVector * (lastctrl.f + lastctrl.b)) + 
+                        ((Workspace.CurrentCamera.CoordinateFrame * CFrame.new(lastctrl.l + lastctrl.r, (lastctrl.f + lastctrl.b) * 0.2, 0).p) - 
+                        Workspace.CurrentCamera.CoordinateFrame.p)) * speed
+                else
+                    bv.velocity = Vector3.new(0, 0.1, 0)
+                end
+                
+                bg.cframe = Workspace.CurrentCamera.CoordinateFrame * CFrame.Angles(-math.rad((ctrl.f + ctrl.b) * 50 * speed / maxspeed), 0, 0)
             end
-        end
-    end
-    return nearest
+            
+            ctrl = {f = 0, b = 0, l = 0, r = 0}
+            tpwalking = false
+            if bg then bg:Destroy() end
+            if bv then bv:Destroy() end
+            
+            humanoid.PlatformStand = false
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Flying, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Landed, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Physics, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Running, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.RunningNoPhysics, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.StrafingNoPhysics, true)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Swimming, true)
+            humanoid:ChangeState(Enum.HumanoidStateType.RunningNoPhysics)
+            char.Animate.Disabled = false
+        end)
+    end)
 end
 
--- ============================================================
--- UI 建立
--- ============================================================
+local function stopFlying()
+    toggles.flying = false
+    tpwalking = false
+    ctrl = {f = 0, b = 0, l = 0, r = 0}
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if toggles.flying then
+        if input.KeyCode == Enum.KeyCode.W then
+            ctrl.f = 1
+        elseif input.KeyCode == Enum.KeyCode.S then
+            ctrl.b = -1
+        elseif input.KeyCode == Enum.KeyCode.A then
+            ctrl.l = -1
+        elseif input.KeyCode == Enum.KeyCode.D then
+            ctrl.r = 1
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.W then
+        ctrl.f = 0
+    elseif input.KeyCode == Enum.KeyCode.S then
+        ctrl.b = 0
+    elseif input.KeyCode == Enum.KeyCode.A then
+        ctrl.l = 0
+    elseif input.KeyCode == Enum.KeyCode.D then
+        ctrl.r = 0
+    end
+end)
+
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "BrickMasterUI"
 screenGui.ResetOnSpawn = false
@@ -145,7 +276,6 @@ closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
 closeButton.Parent = titleBar
 Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 5)
 
--- Tab 列
 local tabBar = Instance.new("Frame")
 tabBar.Size = UDim2.new(0.9, 0, 0, 28)
 tabBar.Position = UDim2.new(0.05, 0, 0, 38)
@@ -220,9 +350,6 @@ tab2.MouseButton1Click:Connect(function() switchTab(2) end)
 tab3.MouseButton1Click:Connect(function() switchTab(3) end)
 switchTab(1)
 
--- ============================================================
--- 元件建立輔助函式
--- ============================================================
 local function createRow(parent, labelText, statusText, btnText, order)
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(1, 0, 0, 32)
@@ -232,7 +359,7 @@ local function createRow(parent, labelText, statusText, btnText, order)
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
 
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(0, 90, 1, 0)
+    label.Size = UDim2.new(0, 85, 1, 0)
     label.Position = UDim2.new(0, 6, 0, 0)
     label.BackgroundTransparency = 1
     label.Text = labelText
@@ -243,8 +370,8 @@ local function createRow(parent, labelText, statusText, btnText, order)
     label.Parent = frame
 
     local status = Instance.new("TextLabel")
-    status.Size = UDim2.new(0, 65, 0, 22)
-    status.Position = UDim2.new(0, 96, 0, 5)
+    status.Size = UDim2.new(0, 55, 0, 22)
+    status.Position = UDim2.new(0, 90, 0, 5)
     status.BackgroundTransparency = 1
     status.Text = statusText or "關閉"
     status.TextSize = 11
@@ -313,18 +440,15 @@ local function createInputRow(parent, labelText, defaultVal, unitText, order)
     return frame, input
 end
 
--- ============================================================
--- 頁面1：攻擊者
--- ============================================================
 local autoBrickFrame,  autoBrickStatus,  autoBrickBtn  = createRow(page1, "自動放積木:", "關閉", "啟動", 1)
-local masterModeFrame, masterModeStatus, masterModeBtn = createRow(page1, "刷精通:", "關閉", "啟動", 2)
-local _, brickIntervalInput = createInputRow(page1, "積木間隔:", "2", "秒", 3)
+local flyingFrame,     flyingStatus,     flyingBtn     = createRow(page1, "飛行:", "關閉", "啟動", 2)
+local posLockFrame,    posLockStatus,    posLockBtn    = createRow(page1, "固定位置:", "關閉", "啟動", 3)
+local _, brickIntervalInput = createInputRow(page1, "積木間隔:", "2", "秒", 4)
 
--- 計數器顯示列
 local countFrame = Instance.new("Frame")
 countFrame.Size = UDim2.new(1, 0, 0, 28)
 countFrame.BackgroundColor3 = THEME.bgRow
-countFrame.LayoutOrder = 4
+countFrame.LayoutOrder = 5
 countFrame.Parent = page1
 Instance.new("UICorner", countFrame).CornerRadius = UDim.new(0, 6)
 
@@ -339,30 +463,22 @@ brickCountLabel.TextColor3 = THEME.textMuted
 brickCountLabel.TextXAlignment = Enum.TextXAlignment.Left
 brickCountLabel.Parent = countFrame
 
--- ============================================================
--- 頁面2：幫助者
--- ============================================================
-local autoAbilityFrame, autoAbilityStatus, autoAbilityBtn = createRow(page2, "自動用能力:", "關閉", "啟動", 1)
+local helperPosLockFrame,  helperPosLockStatus,  helperPosLockBtn  = createRow(page2, "固定位置:", "關閉", "啟動", 1)
+local noclipFrame,         noclipStatus,         noclipBtn         = createRow(page2, "Noclip:", "關閉", "啟動", 2)
 
--- ============================================================
--- 頁面3：說明
--- ============================================================
-local EXPLAIN_TEXT = [[幫助者分區：
+local EXPLAIN_TEXT = [[攻擊者分區：
 
-開自動用能力
-每5.2秒自動使用一次櫻桃能力
-讓旁邊的積木攻擊者偵測到分身
+自動放積木：定時投放積木能力
 
-攻擊者分區：
+飛行：預設速度1，使用 WASD 控制
 
-開刷精通後會偵測最近的玩家
-是否有櫻桃分身
-如果有就會移動到分身前並放積木
-如果沒有就暫停積木能力
+固定位置：鎖定角色位置
 
-如果只是想拿陷阱
-別開刷精通
-只開自動放積木就好]]
+幫助者分區：
+
+固定位置：鎖定角色位置
+
+Noclip：穿牆模式]]
 
 local textRowFrame = Instance.new("Frame")
 textRowFrame.Size = UDim2.new(1, 0, 0, 10)
@@ -398,9 +514,6 @@ local function refreshExplainHeight()
 end
 task.delay(0.1, refreshExplainHeight)
 
--- ============================================================
--- 狀態列
--- ============================================================
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size = UDim2.new(0.9, 0, 0, 26)
 statusLabel.Position = UDim2.new(0.05, 0, 1, -32)
@@ -414,9 +527,10 @@ Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
 
 local function updateStatus()
     local active = {}
-    if toggles.autoBrick   then table.insert(active, "放積木中") end
-    if toggles.masterMode  then table.insert(active, "刷精通中") end
-    if toggles.autoAbility then table.insert(active, "自動能力") end
+    if toggles.autoBrick      then table.insert(active, "放積木中") end
+    if toggles.flying          then table.insert(active, "飛行中") end
+    if toggles.positionLocked  then table.insert(active, "位置鎖定") end
+    if toggles.noclip          then table.insert(active, "Noclip中") end
     if #active > 0 then
         statusLabel.Text = "✅ " .. table.concat(active, " | ")
         statusLabel.TextColor3 = THEME.accent
@@ -441,7 +555,6 @@ local function setRowActive(btn, frame, status, isActive, activeText, inactiveTe
     updateStatus()
 end
 
--- 輸入框驗證
 brickIntervalInput.FocusLost:Connect(function()
     local val = tonumber(brickIntervalInput.Text)
     if val and val > 0 then
@@ -451,80 +564,58 @@ brickIntervalInput.FocusLost:Connect(function()
     end
 end)
 
--- ============================================================
--- 攻擊者主循環
--- ============================================================
--- 在指定 CFrame 持續鎖定玩家位置，直到 stopTick 或 toggles.autoBrick 變 false
-local function holdPosition(hrp, lockCFrame, stopTick)
-    while toggles.autoBrick and tick() < stopTick do
-        pcall(function() hrp.CFrame = lockCFrame end)
+local function runBrickLoop()
+    while toggles.autoBrick do
+        pcall(function() ReplicatedStorage.lbrick:FireServer() end)
+        brickUseCount = brickUseCount + 1
+        if brickCountLabel then
+            brickCountLabel.Text = "已使用積木能力: " .. brickUseCount .. " 次"
+            brickCountLabel.TextColor3 = THEME.accent
+        end
+        task.wait(values.brickInterval)
+    end
+end
+
+local function runPositionLock()
+    while toggles.positionLocked do
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            if not originalPosition then
+                originalPosition = char.HumanoidRootPart.CFrame
+            end
+            pcall(function() char.HumanoidRootPart.CFrame = originalPosition end)
+        end
         task.wait()
     end
 end
 
-local lastStandCF = nil  -- 記住最後一次站立在分身上方的 CFrame
-
-local function runBrickLoop()
-    while toggles.autoBrick do
-        local interval = values.brickInterval
-
-        if toggles.masterMode then
-            local targetHRP = findNearestCherryHRP()
-            local char = player.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-
-            if targetHRP and targetHRP.Parent and hrp then
-                local tPos = targetHRP.Position
-                local standCF = CFrame.new(tPos + Vector3.new(0, 7, 0), tPos)
-                lastStandCF = standCF
-
-                -- 移動過去並鎖定 0.5 秒
-                pcall(function() hrp.CFrame = standCF end)
-                holdPosition(hrp, standCF, tick() + 0.5)
-                if not toggles.autoBrick then break end
-
-                -- 放積木
-                pcall(function() ReplicatedStorage.lbrick:FireServer() end)
-                brickUseCount = brickUseCount + 1
-                if brickCountLabel then
-                    brickCountLabel.Text = "已使用積木能力: " .. brickUseCount .. " 次"
-                    brickCountLabel.TextColor3 = THEME.accent
-                end
-                -- 等 server 處理能力後強制回位
-                task.wait(0.05)
-                pcall(function() hrp.CFrame = standCF end)
-
-                -- 鎖定 1.5 秒後再找下一個分身
-                holdPosition(hrp, standCF, tick() + 1.5)
-
-            else
-                -- 沒有分身：鎖在上次分身位置（或當前位置）等待直到分身出現
-                if hrp then
-                    local holdCF = lastStandCF or hrp.CFrame
-                    while toggles.autoBrick and toggles.masterMode do
-                        pcall(function() hrp.CFrame = holdCF end)
-                        task.wait()
-                        if findNearestCherryHRP() then break end
-                    end
-                else
-                    task.wait(0.3)
-                end
+local function runHelperPositionLock()
+    while toggles.positionLocked do
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            if not originalPosition then
+                originalPosition = char.HumanoidRootPart.CFrame
             end
-        else
-            pcall(function() ReplicatedStorage.lbrick:FireServer() end)
-            brickUseCount = brickUseCount + 1
-            if brickCountLabel then
-                brickCountLabel.Text = "已使用積木能力: " .. brickUseCount .. " 次"
-                brickCountLabel.TextColor3 = THEME.accent
-            end
-            task.wait(interval)
+            pcall(function() char.HumanoidRootPart.CFrame = originalPosition end)
         end
+        task.wait()
     end
 end
 
--- ============================================================
--- 按鈕邏輯
--- ============================================================
+local function runNoclip()
+    while toggles.noclip do
+        local char = player.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end
+
 autoBrickBtn.MouseButton1Click:Connect(function()
     toggles.autoBrick = not toggles.autoBrick
     setRowActive(autoBrickBtn, autoBrickFrame, autoBrickStatus, toggles.autoBrick, "運行中", "關閉")
@@ -540,32 +631,56 @@ autoBrickBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-masterModeBtn.MouseButton1Click:Connect(function()
-    toggles.masterMode = not toggles.masterMode
-    setRowActive(masterModeBtn, masterModeFrame, masterModeStatus, toggles.masterMode, "偵測中", "關閉")
-    -- masterMode 僅作為 flag，runBrickLoop 會即時讀取
-end)
-
-autoAbilityBtn.MouseButton1Click:Connect(function()
-    toggles.autoAbility = not toggles.autoAbility
-    setRowActive(autoAbilityBtn, autoAbilityFrame, autoAbilityStatus, toggles.autoAbility, "運行中", "關閉")
-    if toggles.autoAbility then
-        connections.autoAbility = task.spawn(function()
-            while toggles.autoAbility do
-                pcall(function()
-                    ReplicatedStorage.GeneralAbility:FireServer()
-                end)
-                task.wait(5.2)
-            end
-        end)
+flyingBtn.MouseButton1Click:Connect(function()
+    toggles.flying = not toggles.flying
+    setRowActive(flyingBtn, flyingFrame, flyingStatus, toggles.flying, "飛行中", "關閉")
+    if toggles.flying then
+        startFlying()
     else
-        if connections.autoAbility then task.cancel(connections.autoAbility); connections.autoAbility = nil end
+        stopFlying()
     end
 end)
 
--- ============================================================
--- 拖曳
--- ============================================================
+posLockBtn.MouseButton1Click:Connect(function()
+    toggles.positionLocked = not toggles.positionLocked
+    setRowActive(posLockBtn, posLockFrame, posLockStatus, toggles.positionLocked, "鎖定中", "關閉")
+    if toggles.positionLocked then
+        originalPosition = nil
+        connections.positionLocked = task.spawn(runPositionLock)
+    else
+        if connections.positionLocked then task.cancel(connections.positionLocked); connections.positionLocked = nil end
+    end
+end)
+
+helperPosLockBtn.MouseButton1Click:Connect(function()
+    toggles.positionLocked = not toggles.positionLocked
+    setRowActive(helperPosLockBtn, helperPosLockFrame, helperPosLockStatus, toggles.positionLocked, "鎖定中", "關閉")
+    if toggles.positionLocked then
+        originalPosition = nil
+        connections.positionLocked = task.spawn(runHelperPositionLock)
+    else
+        if connections.positionLocked then task.cancel(connections.positionLocked); connections.positionLocked = nil end
+    end
+end)
+
+noclipBtn.MouseButton1Click:Connect(function()
+    toggles.noclip = not toggles.noclip
+    setRowActive(noclipBtn, noclipFrame, noclipStatus, toggles.noclip, "穿牆中", "關閉")
+    if toggles.noclip then
+        connections.noclip = task.spawn(runNoclip)
+    else
+        if connections.noclip then task.cancel(connections.noclip); connections.noclip = nil end
+        local char = player.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = true
+                end
+            end
+        end
+    end
+end)
+
 local function enableDrag(frame, dragHandle)
     local dragging, dragStart, startPos, dragInput = false, nil, nil, nil
     local function update(input)
@@ -593,7 +708,6 @@ end
 
 enableDrag(mainFrame, titleBar)
 
--- 縮小視窗
 local miniFrame = Instance.new("Frame")
 miniFrame.Size = UDim2.new(0, 160, 0, 32)
 miniFrame.Position = UDim2.new(0.5, -80, 0, 30)
@@ -637,7 +751,8 @@ closeButton.MouseButton1Click:Connect(function()
             else pcall(function() conn:Disconnect() end) end
         end
     end
+    stopFlying()
     screenGui:Destroy()
 end)
 
-print("貓玲的積木精通腳本 v1.2 已載入!")
+print("貓玲的積木精通腳本 v2.0 已載入!")
