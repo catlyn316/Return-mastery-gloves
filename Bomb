@@ -1,4 +1,4 @@
--- 貓玲的炸彈腳本 v1.0
+-- 貓玲的炸彈腳本 v1.1
 local CoreGui          = game:GetService("CoreGui")
 local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -219,12 +219,12 @@ local function runBomberLoop()
 
             -- ── 狙擊+炸虛空 ──────────────────────────────
             if mode == "狙擊+炸虛空" then
-                -- 等 8 秒後持續傳送到炸彈位置直到 ragdoll
+                -- 等 8 秒後持續傳送到炸彈位置
                 task.wait(8)
                 if not toggles.bomber then break end
 
-                local raged    = false
-                local deadline = tick() + 15
+                -- 追蹤炸彈 2 秒
+                local deadline = tick() + 2
                 while toggles.bomber and tick() < deadline do
                     local bombObj = Workspace:FindFirstChild(player.Name .. "_bømb")
                     if bombObj then
@@ -233,16 +233,64 @@ local function runBomberLoop()
                             pcall(function() hrp.CFrame = bombObj.CFrame end)
                         end
                     end
-                    if isRagdolled() then raged = true break end
                     task.wait(0.05)
                 end
 
-                if raged and toggles.bomber then
-                    goToBarrierAndReset()
+                -- 2 秒後觸發丟炸彈事件
+                if toggles.bomber then
+                    pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
+                end
+                task.wait(0.2)
+
+                -- ragdoll 後持續傳到 DEATHBARRIER 直到死亡
+                if toggles.bomber then
+                    while toggles.bomber do
+                        local hum = getHumanoid()
+                        if hum and hum.Health <= 0 then break end
+                        
+                        local barrier = Workspace:FindFirstChild("DEATHBARRIER")
+                        if barrier then
+                            local hrp = getHRP()
+                            if hrp and hrp.Parent then
+                                pcall(function() hrp.CFrame = barrier.CFrame end)
+                            end
+                        end
+                        task.wait(0.05)
+                    end
+                end
+
+                -- 死亡後：等沒 tool 再回 Teleport1
+                waitUntilNoTool(25)
+                local hrp = getHRP()
+                if hrp and hrp.Parent then
+                    pcall(function() hrp.CFrame = Workspace.Lobby.Teleport1.CFrame end)
                 end
 
             -- ── 狙擊 ─────────────────────────────────────
             elseif mode == "狙擊" then
+                -- 等 8 秒後持續傳送到炸彈位置
+                task.wait(8)
+                if not toggles.bomber then break end
+
+                -- 追蹤炸彈 2 秒
+                local deadline = tick() + 2
+                while toggles.bomber and tick() < deadline do
+                    local bombObj = Workspace:FindFirstChild(player.Name .. "_bømb")
+                    if bombObj then
+                        local hrp = getHRP()
+                        if hrp and hrp.Parent then
+                            pcall(function() hrp.CFrame = bombObj.CFrame end)
+                        end
+                    end
+                    task.wait(0.05)
+                end
+
+                -- 2 秒後觸發丟炸彈事件
+                if toggles.bomber then
+                    pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
+                end
+                task.wait(0.2)
+
                 -- 等待 ragdoll
                 local raged = waitUntilRagdolled(30)
                 if raged and toggles.bomber then
@@ -266,15 +314,33 @@ local function runBomberLoop()
 
             -- ── 炸虛空 ───────────────────────────────────
             elseif mode == "炸虛空" then
-                -- 1 秒後再丟一次炸彈
-                task.wait(1)
+                -- 3.1 秒後再丟一次炸彈
+                task.wait(3.1)
                 if not toggles.bomber then break end
                 pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
 
-                -- 若進入 ragdoll 就傳到 DEATHBARRIER
-                local raged = waitUntilRagdolled(15)
-                if raged and toggles.bomber then
-                    goToBarrierAndReset()
+                -- ragdoll 後持續傳到 DEATHBARRIER 直到死亡
+                if toggles.bomber then
+                    while toggles.bomber do
+                        local hum = getHumanoid()
+                        if hum and hum.Health <= 0 then break end
+                        
+                        local barrier = Workspace:FindFirstChild("DEATHBARRIER")
+                        if barrier then
+                            local hrp = getHRP()
+                            if hrp and hrp.Parent then
+                                pcall(function() hrp.CFrame = barrier.CFrame end)
+                            end
+                        end
+                        task.wait(0.05)
+                    end
+                end
+
+                -- 死亡後：等沒 tool 再回 Teleport1
+                waitUntilNoTool(25)
+                local hrp = getHRP()
+                if hrp and hrp.Parent then
+                    pcall(function() hrp.CFrame = Workspace.Lobby.Teleport1.CFrame end)
                 end
             end
         end
@@ -612,7 +678,7 @@ Instance.new("UICorner", fontInput).CornerRadius = UDim.new(0, 5)
 
 -- 說明文字區
 local explainRow = Instance.new("Frame")
-explainRow.Size             = UDim2.new(1, 0, 0, 260)
+explainRow.Size             = UDim2.new(1, 0, 0, 520)
 explainRow.BackgroundColor3 = THEME.bgRow
 explainRow.LayoutOrder      = 2
 explainRow.Parent           = page2
@@ -705,12 +771,13 @@ stroke2.Parent    = miniFrame
 local miniTitle = Instance.new("TextLabel")
 miniTitle.Text               = "炸彈腳本"
 miniTitle.Size               = UDim2.new(1, -36, 1, 0)
-miniTitle.Position           = UDim2.new(0, 8, 0, 0)
+miniTitle.Position           = UDim2.new(0, 0, 0, 0)
 miniTitle.BackgroundTransparency = 1
 miniTitle.Font               = Enum.Font.GothamBold
 miniTitle.TextSize           = 13
 miniTitle.TextColor3         = THEME.accent
-miniTitle.TextXAlignment     = Enum.TextXAlignment.Left
+miniTitle.TextXAlignment     = Enum.TextXAlignment.Center
+miniTitle.TextYAlignment     = Enum.TextYAlignment.Center
 miniTitle.Parent             = miniFrame
 
 local expandButton = Instance.new("TextButton")
