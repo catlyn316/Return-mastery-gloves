@@ -1,0 +1,746 @@
+-- 貓玲的炸彈腳本 v1.0
+local CoreGui          = game:GetService("CoreGui")
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local player           = Players.LocalPlayer
+local playerGui        = player:WaitForChild("PlayerGui")
+local Workspace        = game:GetService("Workspace")
+
+-- ============================================================
+-- 清理舊 GUI
+-- ============================================================
+pcall(function() if CoreGui:FindFirstChild("BombMasterUI") then CoreGui.BombMasterUI:Destroy() end end)
+pcall(function() if playerGui:FindFirstChild("BombMasterUI") then playerGui.BombMasterUI:Destroy() end end)
+pcall(function()
+    if type(gethui) == "function" then
+        local hui = gethui()
+        if hui and hui:FindFirstChild("BombMasterUI") then hui.BombMasterUI:Destroy() end
+    end
+end)
+
+-- ============================================================
+-- 設定
+-- ============================================================
+local toggles     = { bomber = false }
+local connections = { bomber = nil  }
+
+local MODES = { "狙擊+炸虛空", "狙擊", "炸虛空", "正常丟炸彈" }
+local modeIndex = 1
+
+local values = {
+    bombMode    = MODES[1],
+    setPosition = Vector3.new(5125, 274, 9513),
+}
+
+local MODE_COLORS = {
+    ["狙擊+炸虛空"] = Color3.fromRGB( 25,  65, 180),
+    ["狙擊"]        = Color3.fromRGB( 35, 110,  50),
+    ["炸虛空"]      = Color3.fromRGB(110,  55, 160),
+    ["正常丟炸彈"]  = Color3.fromRGB(140,  85,  20),
+}
+
+-- ============================================================
+-- 黑藍主題
+-- ============================================================
+local THEME = {
+    primary     = Color3.fromRGB( 30,  80, 200),
+    primaryDark = Color3.fromRGB( 12,  35, 110),
+    accent      = Color3.fromRGB(150, 200, 255),
+    bg          = Color3.fromRGB(  4,   7,  16),
+    bgRow       = Color3.fromRGB( 10,  18,  36),
+    bgInput     = Color3.fromRGB( 16,  28,  54),
+    titleBg     = Color3.fromRGB(  5,   9,  20),
+    tabBg       = Color3.fromRGB( 12,  22,  46),
+    tabActive   = Color3.fromRGB( 22,  60, 148),
+    textMain    = Color3.fromRGB(200, 220, 255),
+    textSub     = Color3.fromRGB(110, 165, 240),
+    textMuted   = Color3.fromRGB( 55,  95, 175),
+    red         = Color3.fromRGB(200,  45,  45),
+    statusBg    = Color3.fromRGB(  4,   7,  16),
+    green       = Color3.fromRGB( 30, 160,  80),
+}
+
+-- ============================================================
+-- 輔助函數
+-- ============================================================
+local function hasTool()
+    local char = player.Character
+    if char then
+        for _, obj in ipairs(char:GetChildren()) do
+            if obj:IsA("Tool") then return true end
+        end
+    end
+    local bp = player:FindFirstChildOfClass("Backpack")
+    if bp then
+        for _, obj in ipairs(bp:GetChildren()) do
+            if obj:IsA("Tool") then return true end
+        end
+    end
+    return false
+end
+
+local function getHRP()
+    local char = player.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getHumanoid()
+    local char = player.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function teleportTo(pos)
+    local hrp = getHRP()
+    if hrp and hrp.Parent then
+        pcall(function() hrp.CFrame = CFrame.new(pos) end)
+    end
+end
+
+local function isRagdolled()
+    -- 方法一：Workspace 資料夾內 Ragdolled BoolValue
+    local folder = Workspace:FindFirstChild(player.Name)
+    if folder then
+        local rag = folder:FindFirstChild("Ragdolled")
+        if rag and rag.Value then return true end
+    end
+    -- 方法二：Humanoid 物理狀態
+    local hum = getHumanoid()
+    if hum and hum:GetState() == Enum.HumanoidStateType.Physics then return true end
+    return false
+end
+
+local function waitUntilNoTool(timeout)
+    local t = tick()
+    while tick() - t < (timeout or 30) do
+        if not toggles.bomber then return false end
+        if not hasTool() then return true end
+        task.wait(0.1)
+    end
+    return not hasTool()
+end
+
+local function waitUntilHasTool(timeout)
+    local t = tick()
+    while tick() - t < (timeout or 30) do
+        if not toggles.bomber then return false end
+        if hasTool() then return true end
+        task.wait(0.1)
+    end
+    return hasTool()
+end
+
+local function waitUntilRagdolled(timeout)
+    local t = tick()
+    while tick() - t < (timeout or 20) do
+        if not toggles.bomber then return false end
+        if isRagdolled() then return true end
+        task.wait(0.05)
+    end
+    return isRagdolled()
+end
+
+local function waitUntilNotRagdolled(timeout)
+    local t = tick()
+    while tick() - t < (timeout or 20) do
+        if not toggles.bomber then return false end
+        if not isRagdolled() then return true end
+        task.wait(0.05)
+    end
+    return not isRagdolled()
+end
+
+-- 確認手套是炸彈
+local function ensureGloveIsBomb()
+    local lb    = player:FindFirstChild("leaderboard") or player:FindFirstChild("leaderstats")
+    local glove = lb and lb:FindFirstChild("Glove")
+    if glove and glove.Value == "Bomb" then return end
+    -- 不是 Bomb → 重置後選炸彈手套
+    pcall(function() player.Reset:FireServer() end)
+    waitUntilNoTool(10)
+    pcall(function() fireclickdetector(Workspace.Lobby["Bomb"].ClickDetector) end)
+    task.wait(1)
+end
+
+-- ragdoll 後傳到 DEATHBARRIER，等待沒 tool 再回 Teleport1
+local function goToBarrierAndReset()
+    local barrier = Workspace:FindFirstChild("DEATHBARRIER")
+    if barrier then
+        local hrp = getHRP()
+        if hrp and hrp.Parent then
+            pcall(function() hrp.CFrame = barrier.CFrame end)
+        end
+    end
+    waitUntilNoTool(25)
+    local hrp = getHRP()
+    if hrp and hrp.Parent then
+        pcall(function() hrp.CFrame = Workspace.Lobby.Teleport1.CFrame end)
+    end
+end
+
+-- ============================================================
+-- 主迴圈
+-- ============================================================
+local function runBomberLoop()
+    while toggles.bomber do
+
+        -- 確認是炸彈手套
+        ensureGloveIsBomb()
+        if not toggles.bomber then break end
+
+        local mode = values.bombMode
+
+        -- ── 正常丟炸彈 ──────────────────────────────────────
+        if mode == "正常丟炸彈" then
+            teleportTo(values.setPosition)
+            task.wait(0.5)
+            while toggles.bomber do
+                pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
+                task.wait(3.1)
+            end
+
+        -- ── 狙擊+炸虛空 / 狙擊 / 炸虛空 ──────────────────
+        else
+            -- 初始工具判斷：沒 tool 就先傳到 Teleport1 等拿到 tool
+            if not hasTool() then
+                local hrp = getHRP()
+                if hrp and hrp.Parent then
+                    pcall(function() hrp.CFrame = Workspace.Lobby.Teleport1.CFrame end)
+                end
+                if not waitUntilHasTool(20) then task.wait(0.5) continue end
+            end
+            if not toggles.bomber then break end
+
+            -- 傳送到設定位置並丟炸彈
+            teleportTo(values.setPosition)
+            task.wait(0.5)
+            if not toggles.bomber then break end
+            pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
+
+            -- ── 狙擊+炸虛空 ──────────────────────────────
+            if mode == "狙擊+炸虛空" then
+                -- 等 8 秒後持續傳送到炸彈位置直到 ragdoll
+                task.wait(8)
+                if not toggles.bomber then break end
+
+                local raged    = false
+                local deadline = tick() + 15
+                while toggles.bomber and tick() < deadline do
+                    local bombObj = Workspace:FindFirstChild(player.Name .. "_bømb")
+                    if bombObj then
+                        local hrp = getHRP()
+                        if hrp and hrp.Parent then
+                            pcall(function() hrp.CFrame = bombObj.CFrame end)
+                        end
+                    end
+                    if isRagdolled() then raged = true break end
+                    task.wait(0.05)
+                end
+
+                if raged and toggles.bomber then
+                    goToBarrierAndReset()
+                end
+
+            -- ── 狙擊 ─────────────────────────────────────
+            elseif mode == "狙擊" then
+                -- 等待 ragdoll
+                local raged = waitUntilRagdolled(30)
+                if raged and toggles.bomber then
+                    -- 取得 ragdoll 當下位置，固定在原地
+                    local hrp    = getHRP()
+                    local fixPos = hrp and hrp.Position or values.setPosition
+                    local fixLoop = task.spawn(function()
+                        while toggles.bomber and isRagdolled() do
+                            local h = getHRP()
+                            if h and h.Parent then
+                                pcall(function() h.CFrame = CFrame.new(fixPos) end)
+                            end
+                            task.wait(0.05)
+                        end
+                    end)
+                    -- 等解除 ragdoll
+                    waitUntilNotRagdolled(20)
+                    task.cancel(fixLoop)
+                end
+                -- 解除後：下一圈迴圈會傳回設定位置並再次丟炸彈
+
+            -- ── 炸虛空 ───────────────────────────────────
+            elseif mode == "炸虛空" then
+                -- 1 秒後再丟一次炸彈
+                task.wait(1)
+                if not toggles.bomber then break end
+                pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
+
+                -- 若進入 ragdoll 就傳到 DEATHBARRIER
+                local raged = waitUntilRagdolled(15)
+                if raged and toggles.bomber then
+                    goToBarrierAndReset()
+                end
+            end
+        end
+
+        task.wait(0.2)
+    end
+end
+
+-- ============================================================
+-- UI 建構
+-- ============================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name             = "BombMasterUI"
+screenGui.ResetOnSpawn     = false
+screenGui.IgnoreGuiInset   = true
+screenGui.ZIndexBehavior   = Enum.ZIndexBehavior.Global
+screenGui.DisplayOrder     = 10001
+
+local function parentUI(g)
+    local ok = false
+    if not ok then ok = pcall(function() if type(gethui)=="function" then g.Parent=gethui() else error() end end) end
+    if not ok then ok = pcall(function() g.Parent = CoreGui end) end
+    if not ok then g.Parent = playerGui end
+end
+parentUI(screenGui)
+
+-- 主框架
+local mainFrame = Instance.new("Frame")
+mainFrame.Size              = UDim2.new(0, 280, 0, 278)
+mainFrame.Position          = UDim2.new(0.5, -140, 0.5, -139)
+mainFrame.BackgroundColor3  = THEME.bg
+mainFrame.BorderSizePixel   = 0
+mainFrame.Parent            = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
+
+local stroke = Instance.new("UIStroke")
+stroke.Color     = THEME.primaryDark
+stroke.Thickness = 1.5
+stroke.Parent    = mainFrame
+
+-- 標題列
+local titleBar = Instance.new("Frame")
+titleBar.Size             = UDim2.new(1, 0, 0, 32)
+titleBar.BackgroundColor3 = THEME.titleBg
+titleBar.Parent           = mainFrame
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel")
+title.Size               = UDim2.new(1, -62, 1, 0)
+title.Position           = UDim2.new(0, 10, 0, 0)
+title.BackgroundTransparency = 1
+title.Text               = "貓玲的炸彈腳本"
+title.TextSize           = 14
+title.Font               = Enum.Font.GothamBold
+title.TextColor3         = THEME.accent
+title.TextXAlignment     = Enum.TextXAlignment.Left
+title.Parent             = titleBar
+
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size             = UDim2.new(0, 24, 0, 24)
+minimizeButton.Position         = UDim2.new(1, -54, 0, 4)
+minimizeButton.BackgroundColor3 = THEME.tabActive
+minimizeButton.Text             = "─"
+minimizeButton.TextColor3       = THEME.textMain
+minimizeButton.Parent           = titleBar
+Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 5)
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size             = UDim2.new(0, 24, 0, 24)
+closeButton.Position         = UDim2.new(1, -28, 0, 4)
+closeButton.BackgroundColor3 = THEME.red
+closeButton.Text             = "X"
+closeButton.TextColor3       = Color3.fromRGB(255, 255, 255)
+closeButton.Parent           = titleBar
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 5)
+
+-- 狀態標籤（提前宣告，供 updateStatus 使用）
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size             = UDim2.new(0.9, 0, 0, 26)
+statusLabel.Position         = UDim2.new(0.05, 0, 1, -32)
+statusLabel.BackgroundColor3 = THEME.statusBg
+statusLabel.Text             = "系統就緒"
+statusLabel.TextSize         = 11
+statusLabel.Font             = Enum.Font.GothamBold
+statusLabel.TextColor3       = THEME.primary
+statusLabel.TextXAlignment   = Enum.TextXAlignment.Center
+statusLabel.Parent           = mainFrame
+Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
+
+-- 分頁標籤列
+local tabBar = Instance.new("Frame")
+tabBar.Size             = UDim2.new(0.9, 0, 0, 28)
+tabBar.Position         = UDim2.new(0.05, 0, 0, 38)
+tabBar.BackgroundColor3 = THEME.tabBg
+tabBar.Parent           = mainFrame
+Instance.new("UICorner", tabBar).CornerRadius = UDim.new(0, 6)
+
+local function createTab(text, index, total)
+    local w   = 1 / total
+    local tab = Instance.new("TextButton")
+    tab.Size             = UDim2.new(w, -4, 1, -4)
+    tab.Position         = UDim2.new((index - 1) * w, 2, 0, 2)
+    tab.BackgroundColor3 = THEME.tabBg
+    tab.Text             = text
+    tab.TextSize         = 12
+    tab.Font             = Enum.Font.GothamBold
+    tab.TextColor3       = THEME.textMuted
+    tab.Parent           = tabBar
+    Instance.new("UICorner", tab).CornerRadius = UDim.new(0, 4)
+    return tab
+end
+
+local tab1 = createTab("炸彈", 1, 2)
+local tab2 = createTab("說明", 2, 2)
+
+-- 內容容器
+local contentContainer = Instance.new("Frame")
+contentContainer.Size               = UDim2.new(0.9, 0, 0, 178)
+contentContainer.Position           = UDim2.new(0.05, 0, 0, 72)
+contentContainer.BackgroundTransparency = 1
+contentContainer.ClipsDescendants   = true
+contentContainer.Parent             = mainFrame
+
+local function createScrollingPage(parent)
+    local page = Instance.new("ScrollingFrame")
+    page.Size                 = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel      = 0
+    page.ScrollBarThickness   = 4
+    page.ScrollBarImageColor3 = THEME.primary
+    page.AutomaticCanvasSize  = Enum.AutomaticSize.Y
+    page.Visible              = false
+    page.Parent               = parent
+    local layout = Instance.new("UIListLayout")
+    layout.Padding             = UDim.new(0, 6)
+    layout.SortOrder           = Enum.SortOrder.LayoutOrder
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.Parent              = page
+    local padding = Instance.new("UIPadding")
+    padding.PaddingRight = UDim.new(0, 6)
+    padding.Parent       = page
+    return page
+end
+
+local page1 = createScrollingPage(contentContainer)
+local page2 = createScrollingPage(contentContainer)
+page1.Visible = true
+
+local function switchTab(n)
+    page1.Visible = (n == 1)
+    page2.Visible = (n == 2)
+    local tabs = { tab1, tab2 }
+    for i, t in ipairs(tabs) do
+        t.BackgroundColor3 = (i == n) and THEME.tabActive or THEME.tabBg
+        t.TextColor3       = (i == n) and THEME.textMain  or THEME.textMuted
+    end
+end
+
+tab1.MouseButton1Click:Connect(function() switchTab(1) end)
+tab2.MouseButton1Click:Connect(function() switchTab(2) end)
+switchTab(1)
+
+-- ============================================================
+-- UI 元件建構函數
+-- ============================================================
+local function createWideButtonRow(parent, labelText, btnText, btnColor, order)
+    local frame = Instance.new("Frame")
+    frame.Size             = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = THEME.bgRow
+    frame.LayoutOrder      = order or 0
+    frame.Parent           = parent
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+
+    local label = Instance.new("TextLabel")
+    label.Size               = UDim2.new(0, 72, 1, 0)
+    label.Position           = UDim2.new(0, 6, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text               = labelText
+    label.TextSize           = 12
+    label.Font               = Enum.Font.GothamBold
+    label.TextColor3         = THEME.textSub
+    label.TextXAlignment     = Enum.TextXAlignment.Left
+    label.Parent             = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, 170, 0, 22)
+    btn.Position         = UDim2.new(0, 78, 0, 5)
+    btn.BackgroundColor3 = btnColor or THEME.primary
+    btn.Text             = btnText
+    btn.TextSize         = 10
+    btn.Font             = Enum.Font.Gotham
+    btn.TextColor3       = Color3.fromRGB(255, 255, 255)
+    btn.Parent           = frame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+    return frame, btn
+end
+
+local function createRow(parent, labelText, statusText, btnText, order)
+    local frame = Instance.new("Frame")
+    frame.Size             = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = THEME.bgRow
+    frame.LayoutOrder      = order or 0
+    frame.Parent           = parent
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+
+    local label = Instance.new("TextLabel")
+    label.Size               = UDim2.new(0, 90, 1, 0)
+    label.Position           = UDim2.new(0, 6, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text               = labelText
+    label.TextSize           = 12
+    label.Font               = Enum.Font.GothamBold
+    label.TextColor3         = THEME.textSub
+    label.TextXAlignment     = Enum.TextXAlignment.Left
+    label.Parent             = frame
+
+    local status = Instance.new("TextLabel")
+    status.Size             = UDim2.new(0, 65, 0, 22)
+    status.Position         = UDim2.new(0, 96, 0, 5)
+    status.BackgroundTransparency = 1
+    status.Text             = statusText or "關閉"
+    status.TextSize         = 11
+    status.Font             = Enum.Font.Gotham
+    status.TextColor3       = THEME.textMuted
+    status.TextXAlignment   = Enum.TextXAlignment.Left
+    status.Parent           = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, 50, 0, 22)
+    btn.Position         = UDim2.new(1, -55, 0, 5)
+    btn.BackgroundColor3 = THEME.green
+    btn.Text             = btnText or "開始"
+    btn.TextSize         = 12
+    btn.Font             = Enum.Font.GothamBold
+    btn.TextColor3       = Color3.fromRGB(255, 255, 255)
+    btn.Parent           = frame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+    return frame, status, btn
+end
+
+-- ============================================================
+-- 頁面 1：炸彈
+-- ============================================================
+
+-- ① 選擇模式（上方）
+local modeFrame, modeBtn = createWideButtonRow(
+    page1, "選擇模式:", MODES[1], MODE_COLORS[MODES[1]], 1
+)
+
+-- ② 開始／停止（下方）
+local startFrame, startStatus, startBtn = createRow(page1, "自動執行:", "關閉", "開始", 2)
+
+-- updateStatus
+local function updateStatus()
+    if toggles.bomber then
+        statusLabel.Text      = "💣 執行中 | " .. values.bombMode
+        statusLabel.TextColor3 = THEME.accent
+    else
+        statusLabel.Text      = "系統就緒"
+        statusLabel.TextColor3 = THEME.primary
+    end
+end
+
+-- 模式切換
+modeBtn.MouseButton1Click:Connect(function()
+    modeIndex        = (modeIndex % #MODES) + 1
+    values.bombMode  = MODES[modeIndex]
+    modeBtn.Text             = values.bombMode
+    modeBtn.BackgroundColor3 = MODE_COLORS[values.bombMode]
+    if toggles.bomber then updateStatus() end
+end)
+
+-- 開始 / 停止
+startBtn.MouseButton1Click:Connect(function()
+    toggles.bomber = not toggles.bomber
+    if toggles.bomber then
+        startBtn.Text             = "停止"
+        startBtn.BackgroundColor3 = THEME.red
+        startStatus.Text          = "執行中"
+        startStatus.TextColor3    = THEME.accent
+        startFrame.BackgroundColor3 = Color3.fromRGB(8, 16, 34)
+        connections.bomber = task.spawn(runBomberLoop)
+    else
+        startBtn.Text             = "開始"
+        startBtn.BackgroundColor3 = THEME.green
+        startStatus.Text          = "關閉"
+        startStatus.TextColor3    = THEME.textMuted
+        startFrame.BackgroundColor3 = THEME.bgRow
+        if connections.bomber then
+            task.cancel(connections.bomber)
+            connections.bomber = nil
+        end
+    end
+    updateStatus()
+end)
+
+-- ============================================================
+-- 頁面 2：說明
+-- ============================================================
+
+-- 字體大小列
+local fontRow = Instance.new("Frame")
+fontRow.Size             = UDim2.new(1, 0, 0, 32)
+fontRow.BackgroundColor3 = THEME.bgRow
+fontRow.LayoutOrder      = 1
+fontRow.Parent           = page2
+Instance.new("UICorner", fontRow).CornerRadius = UDim.new(0, 6)
+
+local fontLabel = Instance.new("TextLabel")
+fontLabel.Size               = UDim2.new(0, 80, 1, 0)
+fontLabel.Position           = UDim2.new(0, 6, 0, 0)
+fontLabel.BackgroundTransparency = 1
+fontLabel.Text               = "字體大小:"
+fontLabel.TextSize           = 12
+fontLabel.Font               = Enum.Font.GothamBold
+fontLabel.TextColor3         = THEME.textSub
+fontLabel.TextXAlignment     = Enum.TextXAlignment.Left
+fontLabel.TextYAlignment     = Enum.TextYAlignment.Center
+fontLabel.Parent             = fontRow
+
+local fontInput = Instance.new("TextBox")
+fontInput.Size             = UDim2.new(0, 60, 0, 22)
+fontInput.Position         = UDim2.new(0, 88, 0, 5)
+fontInput.BackgroundColor3 = THEME.bgInput
+fontInput.BorderSizePixel  = 1
+fontInput.BorderColor3     = THEME.primaryDark
+fontInput.Text             = "12"
+fontInput.TextSize         = 12
+fontInput.Font             = Enum.Font.Gotham
+fontInput.TextColor3       = THEME.textMain
+fontInput.Parent           = fontRow
+Instance.new("UICorner", fontInput).CornerRadius = UDim.new(0, 5)
+
+-- 說明文字區
+local explainRow = Instance.new("Frame")
+explainRow.Size             = UDim2.new(1, 0, 0, 260)
+explainRow.BackgroundColor3 = THEME.bgRow
+explainRow.LayoutOrder      = 2
+explainRow.Parent           = page2
+Instance.new("UICorner", explainRow).CornerRadius = UDim.new(0, 6)
+
+local explainLabel = Instance.new("TextLabel")
+explainLabel.Size               = UDim2.new(1, -16, 1, -16)
+explainLabel.Position           = UDim2.new(0, 8, 0, 8)
+explainLabel.BackgroundTransparency = 1
+explainLabel.Text               =
+    "【注意】\n" ..
+    "要先開安全區！\n\n" ..
+    "炸彈精通一個人就能解\n\n" ..
+    "【4個模式能選】\n" ..
+    "狙擊+炸虛空、狙擊、\n" ..
+    "炸虛空、正常丟炸彈\n\n" ..
+    "【模式說明】\n" ..
+    "狙擊：丟炸彈過10秒後\n" ..
+    "會把你傳送到炸彈那炸\n\n" ..
+    "炸虛空：被炸到後能直\n" ..
+    "接傳到虛空\n\n" ..
+    "正常丟炸彈：每6.2秒\n" ..
+    "丟一次炸彈引爆"
+explainLabel.TextSize         = 12
+explainLabel.Font             = Enum.Font.Gotham
+explainLabel.TextColor3       = THEME.textMain
+explainLabel.TextXAlignment   = Enum.TextXAlignment.Left
+explainLabel.TextYAlignment   = Enum.TextYAlignment.Top
+explainLabel.TextWrapped      = true
+explainLabel.LineHeight        = 1.3
+explainLabel.Parent           = explainRow
+
+fontInput.FocusLost:Connect(function()
+    local v = tonumber(fontInput.Text)
+    v = v and math.clamp(v, 8, 24) or 12
+    fontInput.Text        = tostring(v)
+    explainLabel.TextSize = v
+end)
+
+-- ============================================================
+-- 拖曳
+-- ============================================================
+local function enableDrag(frame, dragHandle)
+    local dragging, dragStart, startPos, dragInput = false, nil, nil, nil
+    local function update(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    dragHandle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
+end
+
+enableDrag(mainFrame, titleBar)
+
+-- 最小化框
+local miniFrame = Instance.new("Frame")
+miniFrame.Size             = UDim2.new(0, 160, 0, 32)
+miniFrame.Position         = UDim2.new(0.5, -80, 0, 30)
+miniFrame.BackgroundColor3 = THEME.titleBg
+miniFrame.Visible          = false
+miniFrame.Parent           = screenGui
+Instance.new("UICorner", miniFrame).CornerRadius = UDim.new(0, 6)
+
+local stroke2 = Instance.new("UIStroke")
+stroke2.Color     = THEME.primaryDark
+stroke2.Thickness = 1.5
+stroke2.Parent    = miniFrame
+
+local miniTitle = Instance.new("TextLabel")
+miniTitle.Text               = "炸彈腳本"
+miniTitle.Size               = UDim2.new(1, -36, 1, 0)
+miniTitle.Position           = UDim2.new(0, 8, 0, 0)
+miniTitle.BackgroundTransparency = 1
+miniTitle.Font               = Enum.Font.GothamBold
+miniTitle.TextSize           = 13
+miniTitle.TextColor3         = THEME.accent
+miniTitle.TextXAlignment     = Enum.TextXAlignment.Left
+miniTitle.Parent             = miniFrame
+
+local expandButton = Instance.new("TextButton")
+expandButton.Text             = "+"
+expandButton.Size             = UDim2.new(0, 24, 0, 24)
+expandButton.Position         = UDim2.new(1, -28, 0, 4)
+expandButton.BackgroundColor3 = THEME.primary
+expandButton.TextColor3       = Color3.fromRGB(255, 255, 255)
+expandButton.Parent           = miniFrame
+Instance.new("UICorner", expandButton).CornerRadius = UDim.new(0, 5)
+
+enableDrag(miniFrame, miniFrame)
+
+minimizeButton.MouseButton1Click:Connect(function()
+    mainFrame.Visible = false
+    miniFrame.Visible = true
+end)
+expandButton.MouseButton1Click:Connect(function()
+    miniFrame.Visible = false
+    mainFrame.Visible = true
+end)
+closeButton.MouseButton1Click:Connect(function()
+    toggles.bomber = false
+    for _, conn in pairs(connections) do
+        if conn then
+            if type(conn) == "thread" then task.cancel(conn)
+            else pcall(function() conn:Disconnect() end) end
+        end
+    end
+    screenGui:Destroy()
+end)
+
+print("貓玲的炸彈腳本 v1.0 已載入!")
