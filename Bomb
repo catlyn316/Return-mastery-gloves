@@ -1,4 +1,4 @@
--- 貓玲的炸彈腳本 v1.1
+-- 貓玲的炸彈腳本 v1.3
 local CoreGui          = game:GetService("CoreGui")
 local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -7,9 +7,6 @@ local player           = Players.LocalPlayer
 local playerGui        = player:WaitForChild("PlayerGui")
 local Workspace        = game:GetService("Workspace")
 
--- ============================================================
--- 清理舊 GUI
--- ============================================================
 pcall(function() if CoreGui:FindFirstChild("BombMasterUI") then CoreGui.BombMasterUI:Destroy() end end)
 pcall(function() if playerGui:FindFirstChild("BombMasterUI") then playerGui.BombMasterUI:Destroy() end end)
 pcall(function()
@@ -19,9 +16,6 @@ pcall(function()
     end
 end)
 
--- ============================================================
--- 設定
--- ============================================================
 local toggles     = { bomber = false }
 local connections = { bomber = nil  }
 
@@ -40,9 +34,6 @@ local MODE_COLORS = {
     ["正常丟炸彈"]  = Color3.fromRGB(140,  85,  20),
 }
 
--- ============================================================
--- 黑藍主題
--- ============================================================
 local THEME = {
     primary     = Color3.fromRGB( 30,  80, 200),
     primaryDark = Color3.fromRGB( 12,  35, 110),
@@ -61,9 +52,6 @@ local THEME = {
     green       = Color3.fromRGB( 30, 160,  80),
 }
 
--- ============================================================
--- 輔助函數
--- ============================================================
 local function hasTool()
     local char = player.Character
     if char then
@@ -98,13 +86,11 @@ local function teleportTo(pos)
 end
 
 local function isRagdolled()
-    -- 方法一：Workspace 資料夾內 Ragdolled BoolValue
     local folder = Workspace:FindFirstChild(player.Name)
     if folder then
         local rag = folder:FindFirstChild("Ragdolled")
         if rag and rag.Value then return true end
     end
-    -- 方法二：Humanoid 物理狀態
     local hum = getHumanoid()
     if hum and hum:GetState() == Enum.HumanoidStateType.Physics then return true end
     return false
@@ -150,58 +136,56 @@ local function waitUntilNotRagdolled(timeout)
     return not isRagdolled()
 end
 
--- 確認手套是炸彈
 local function ensureGloveIsBomb()
     local lb    = player:FindFirstChild("leaderboard") or player:FindFirstChild("leaderstats")
     local glove = lb and lb:FindFirstChild("Glove")
     if glove and glove.Value == "Bomb" then return end
-    -- 不是 Bomb → 重置後選炸彈手套
     pcall(function() player.Reset:FireServer() end)
     waitUntilNoTool(10)
     pcall(function() fireclickdetector(Workspace.Lobby["Bomb"].ClickDetector) end)
     task.wait(1)
 end
 
--- ragdoll 後傳到 DEATHBARRIER，等待沒 tool 再回 Teleport1
-local function goToBarrierAndReset()
-    local barrier = Workspace:FindFirstChild("DEATHBARRIER")
-    if barrier then
-        local hrp = getHRP()
-        if hrp and hrp.Parent then
-            pcall(function() hrp.CFrame = barrier.CFrame end)
-        end
-    end
-    waitUntilNoTool(25)
-    local hrp = getHRP()
-    if hrp and hrp.Parent then
-        pcall(function() hrp.CFrame = Workspace.Lobby.Teleport1.CFrame end)
-    end
-end
+local lastToolCheckTime = tick()
 
--- ============================================================
--- 主迴圈
--- ============================================================
 local function runBomberLoop()
+    lastToolCheckTime = tick()
+    
     while toggles.bomber do
-
-        -- 確認是炸彈手套
         ensureGloveIsBomb()
         if not toggles.bomber then break end
 
         local mode = values.bombMode
 
-        -- ── 正常丟炸彈 ──────────────────────────────────────
         if mode == "正常丟炸彈" then
             teleportTo(values.setPosition)
             task.wait(0.5)
             while toggles.bomber do
+                if hasTool() then
+                    lastToolCheckTime = tick()
+                elseif tick() - lastToolCheckTime > 2 then
+                    teleportTo(Workspace.Lobby.Teleport1.Position)
+                    task.wait(0.3)
+                    teleportTo(values.setPosition)
+                    local fixStart = tick()
+                    local hrp = getHRP()
+                    if hrp and hrp.Parent then
+                        local origCFrame = hrp.CFrame
+                        while tick() - fixStart < 1 and toggles.bomber do
+                            if hrp and hrp.Parent then
+                                pcall(function() hrp.CFrame = origCFrame end)
+                            end
+                            task.wait(0.05)
+                        end
+                    end
+                    lastToolCheckTime = tick()
+                end
+                
                 pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
                 task.wait(3.1)
             end
 
-        -- ── 狙擊+炸虛空 / 狙擊 / 炸虛空 ──────────────────
         else
-            -- 初始工具判斷：沒 tool 就先傳到 Teleport1 等拿到 tool
             if not hasTool() then
                 local hrp = getHRP()
                 if hrp and hrp.Parent then
@@ -211,21 +195,39 @@ local function runBomberLoop()
             end
             if not toggles.bomber then break end
 
-            -- 傳送到設定位置並丟炸彈
             teleportTo(values.setPosition)
             task.wait(0.5)
             if not toggles.bomber then break end
+            
+            lastToolCheckTime = tick()
             pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
 
-            -- ── 狙擊+炸虛空 ──────────────────────────────
             if mode == "狙擊+炸虛空" then
-                -- 等 8 秒後持續傳送到炸彈位置
                 task.wait(8)
                 if not toggles.bomber then break end
 
-                -- 追蹤炸彈 2 秒
                 local deadline = tick() + 2
                 while toggles.bomber and tick() < deadline do
+                    if hasTool() then
+                        lastToolCheckTime = tick()
+                    elseif tick() - lastToolCheckTime > 2 then
+                        teleportTo(Workspace.Lobby.Teleport1.Position)
+                        task.wait(0.3)
+                        teleportTo(values.setPosition)
+                        local fixStart = tick()
+                        local hrp = getHRP()
+                        if hrp and hrp.Parent then
+                            local origCFrame = hrp.CFrame
+                            while tick() - fixStart < 1 and toggles.bomber do
+                                if hrp and hrp.Parent then
+                                    pcall(function() hrp.CFrame = origCFrame end)
+                                end
+                                task.wait(0.05)
+                            end
+                        end
+                        lastToolCheckTime = tick()
+                    end
+                    
                     local bombObj = Workspace:FindFirstChild(player.Name .. "_bømb")
                     if bombObj then
                         local hrp = getHRP()
@@ -236,15 +238,33 @@ local function runBomberLoop()
                     task.wait(0.05)
                 end
 
-                -- 2 秒後觸發丟炸彈事件
                 if toggles.bomber then
                     pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
                 end
                 task.wait(0.2)
 
-                -- ragdoll 後持續傳到 DEATHBARRIER 直到死亡
                 if toggles.bomber then
                     while toggles.bomber do
+                        if hasTool() then
+                            lastToolCheckTime = tick()
+                        elseif tick() - lastToolCheckTime > 2 then
+                            teleportTo(Workspace.Lobby.Teleport1.Position)
+                            task.wait(0.3)
+                            teleportTo(values.setPosition)
+                            local fixStart = tick()
+                            local hrp = getHRP()
+                            if hrp and hrp.Parent then
+                                local origCFrame = hrp.CFrame
+                                while tick() - fixStart < 1 and toggles.bomber do
+                                    if hrp and hrp.Parent then
+                                        pcall(function() hrp.CFrame = origCFrame end)
+                                    end
+                                    task.wait(0.05)
+                                end
+                            end
+                            lastToolCheckTime = tick()
+                        end
+                        
                         local hum = getHumanoid()
                         if hum and hum.Health <= 0 then break end
                         
@@ -259,22 +279,38 @@ local function runBomberLoop()
                     end
                 end
 
-                -- 死亡後：等沒 tool 再回 Teleport1
                 waitUntilNoTool(25)
                 local hrp = getHRP()
                 if hrp and hrp.Parent then
                     pcall(function() hrp.CFrame = Workspace.Lobby.Teleport1.CFrame end)
                 end
 
-            -- ── 狙擊 ─────────────────────────────────────
             elseif mode == "狙擊" then
-                -- 等 8 秒後持續傳送到炸彈位置
                 task.wait(8)
                 if not toggles.bomber then break end
 
-                -- 追蹤炸彈 2 秒
                 local deadline = tick() + 2
                 while toggles.bomber and tick() < deadline do
+                    if hasTool() then
+                        lastToolCheckTime = tick()
+                    elseif tick() - lastToolCheckTime > 2 then
+                        teleportTo(Workspace.Lobby.Teleport1.Position)
+                        task.wait(0.3)
+                        teleportTo(values.setPosition)
+                        local fixStart = tick()
+                        local hrp = getHRP()
+                        if hrp and hrp.Parent then
+                            local origCFrame = hrp.CFrame
+                            while tick() - fixStart < 1 and toggles.bomber do
+                                if hrp and hrp.Parent then
+                                    pcall(function() hrp.CFrame = origCFrame end)
+                                end
+                                task.wait(0.05)
+                            end
+                        end
+                        lastToolCheckTime = tick()
+                    end
+                    
                     local bombObj = Workspace:FindFirstChild(player.Name .. "_bømb")
                     if bombObj then
                         local hrp = getHRP()
@@ -285,43 +321,112 @@ local function runBomberLoop()
                     task.wait(0.05)
                 end
 
-                -- 2 秒後觸發丟炸彈事件
                 if toggles.bomber then
                     pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
                 end
                 task.wait(0.2)
 
-                -- 等待 ragdoll
                 local raged = waitUntilRagdolled(30)
                 if raged and toggles.bomber then
-                    -- 取得 ragdoll 當下位置，固定在原地
                     local hrp    = getHRP()
                     local fixPos = hrp and hrp.Position or values.setPosition
                     local fixLoop = task.spawn(function()
                         while toggles.bomber and isRagdolled() do
-                            local h = getHRP()
-                            if h and h.Parent then
-                                pcall(function() h.CFrame = CFrame.new(fixPos) end)
+                            if hasTool() then
+                                lastToolCheckTime = tick()
+                            elseif tick() - lastToolCheckTime > 2 then
+                                local h = getHRP()
+                                if h and h.Parent then
+                                    pcall(function() h.CFrame = CFrame.new(Workspace.Lobby.Teleport1.Position) end)
+                                end
+                                task.wait(0.3)
+                                h = getHRP()
+                                if h and h.Parent then
+                                    pcall(function() h.CFrame = CFrame.new(values.setPosition) end)
+                                end
+                                local fixStart = tick()
+                                while tick() - fixStart < 1 and toggles.bomber and isRagdolled() do
+                                    if h and h.Parent then
+                                        pcall(function() h.CFrame = CFrame.new(values.setPosition) end)
+                                    end
+                                    task.wait(0.05)
+                                end
+                                lastToolCheckTime = tick()
+                            else
+                                local h = getHRP()
+                                if h and h.Parent then
+                                    pcall(function() h.CFrame = CFrame.new(fixPos) end)
+                                end
                             end
                             task.wait(0.05)
                         end
                     end)
-                    -- 等解除 ragdoll
                     waitUntilNotRagdolled(20)
                     task.cancel(fixLoop)
                 end
-                -- 解除後：下一圈迴圈會傳回設定位置並再次丟炸彈
 
-            -- ── 炸虛空 ───────────────────────────────────
             elseif mode == "炸虛空" then
-                -- 3.1 秒後再丟一次炸彈
-                task.wait(3.1)
-                if not toggles.bomber then break end
-                pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
+                local bombTrackDeadline = tick() + 3.1
+                local ragdollDetected = false
+                
+                while toggles.bomber and tick() < bombTrackDeadline and not ragdollDetected do
+                    if isRagdolled() then
+                        ragdollDetected = true
+                        break
+                    end
+                    
+                    if hasTool() then
+                        lastToolCheckTime = tick()
+                    elseif tick() - lastToolCheckTime > 2 then
+                        teleportTo(Workspace.Lobby.Teleport1.Position)
+                        task.wait(0.3)
+                        teleportTo(values.setPosition)
+                        local fixStart = tick()
+                        local hrp = getHRP()
+                        if hrp and hrp.Parent then
+                            local origCFrame = hrp.CFrame
+                            while tick() - fixStart < 1 and toggles.bomber do
+                                if hrp and hrp.Parent then
+                                    pcall(function() hrp.CFrame = origCFrame end)
+                                end
+                                task.wait(0.05)
+                            end
+                        end
+                        lastToolCheckTime = tick()
+                    end
+                    
+                    local bombObj = Workspace:FindFirstChild(player.Name .. "_bømb")
+                    if bombObj then
+                        local hrp = getHRP()
+                        if hrp and hrp.Parent then
+                            pcall(function() hrp.CFrame = bombObj.CFrame end)
+                        end
+                    end
+                    task.wait(0.05)
+                end
 
-                -- ragdoll 後持續傳到 DEATHBARRIER 直到死亡
                 if toggles.bomber then
                     while toggles.bomber do
+                        if hasTool() then
+                            lastToolCheckTime = tick()
+                        elseif tick() - lastToolCheckTime > 2 then
+                            teleportTo(Workspace.Lobby.Teleport1.Position)
+                            task.wait(0.3)
+                            teleportTo(values.setPosition)
+                            local fixStart = tick()
+                            local hrp = getHRP()
+                            if hrp and hrp.Parent then
+                                local origCFrame = hrp.CFrame
+                                while tick() - fixStart < 1 and toggles.bomber do
+                                    if hrp and hrp.Parent then
+                                        pcall(function() hrp.CFrame = origCFrame end)
+                                    end
+                                    task.wait(0.05)
+                                end
+                            end
+                            lastToolCheckTime = tick()
+                        end
+                        
                         local hum = getHumanoid()
                         if hum and hum.Health <= 0 then break end
                         
@@ -336,11 +441,15 @@ local function runBomberLoop()
                     end
                 end
 
-                -- 死亡後：等沒 tool 再回 Teleport1
                 waitUntilNoTool(25)
                 local hrp = getHRP()
                 if hrp and hrp.Parent then
                     pcall(function() hrp.CFrame = Workspace.Lobby.Teleport1.CFrame end)
+                end
+                
+                task.wait(3.1)
+                if toggles.bomber then
+                    pcall(function() ReplicatedStorage.BombThrow:FireServer("Ebutton") end)
                 end
             end
         end
@@ -349,9 +458,6 @@ local function runBomberLoop()
     end
 end
 
--- ============================================================
--- UI 建構
--- ============================================================
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name             = "BombMasterUI"
 screenGui.ResetOnSpawn     = false
@@ -367,7 +473,6 @@ local function parentUI(g)
 end
 parentUI(screenGui)
 
--- 主框架
 local mainFrame = Instance.new("Frame")
 mainFrame.Size              = UDim2.new(0, 280, 0, 278)
 mainFrame.Position          = UDim2.new(0.5, -140, 0.5, -139)
@@ -381,7 +486,6 @@ stroke.Color     = THEME.primaryDark
 stroke.Thickness = 1.5
 stroke.Parent    = mainFrame
 
--- 標題列
 local titleBar = Instance.new("Frame")
 titleBar.Size             = UDim2.new(1, 0, 0, 32)
 titleBar.BackgroundColor3 = THEME.titleBg
@@ -417,7 +521,6 @@ closeButton.TextColor3       = Color3.fromRGB(255, 255, 255)
 closeButton.Parent           = titleBar
 Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 5)
 
--- 狀態標籤（提前宣告，供 updateStatus 使用）
 local statusLabel = Instance.new("TextLabel")
 statusLabel.Size             = UDim2.new(0.9, 0, 0, 26)
 statusLabel.Position         = UDim2.new(0.05, 0, 1, -32)
@@ -430,7 +533,6 @@ statusLabel.TextXAlignment   = Enum.TextXAlignment.Center
 statusLabel.Parent           = mainFrame
 Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
 
--- 分頁標籤列
 local tabBar = Instance.new("Frame")
 tabBar.Size             = UDim2.new(0.9, 0, 0, 28)
 tabBar.Position         = UDim2.new(0.05, 0, 0, 38)
@@ -456,7 +558,6 @@ end
 local tab1 = createTab("炸彈", 1, 2)
 local tab2 = createTab("說明", 2, 2)
 
--- 內容容器
 local contentContainer = Instance.new("Frame")
 contentContainer.Size               = UDim2.new(0.9, 0, 0, 178)
 contentContainer.Position           = UDim2.new(0.05, 0, 0, 72)
@@ -503,9 +604,6 @@ tab1.MouseButton1Click:Connect(function() switchTab(1) end)
 tab2.MouseButton1Click:Connect(function() switchTab(2) end)
 switchTab(1)
 
--- ============================================================
--- UI 元件建構函數
--- ============================================================
 local function createWideButtonRow(parent, labelText, btnText, btnColor, order)
     local frame = Instance.new("Frame")
     frame.Size             = UDim2.new(1, 0, 0, 32)
@@ -583,19 +681,12 @@ local function createRow(parent, labelText, statusText, btnText, order)
     return frame, status, btn
 end
 
--- ============================================================
--- 頁面 1：炸彈
--- ============================================================
-
--- ① 選擇模式（上方）
 local modeFrame, modeBtn = createWideButtonRow(
     page1, "選擇模式:", MODES[1], MODE_COLORS[MODES[1]], 1
 )
 
--- ② 開始／停止（下方）
 local startFrame, startStatus, startBtn = createRow(page1, "自動執行:", "關閉", "開始", 2)
 
--- updateStatus
 local function updateStatus()
     if toggles.bomber then
         statusLabel.Text      = "💣 執行中 | " .. values.bombMode
@@ -606,7 +697,6 @@ local function updateStatus()
     end
 end
 
--- 模式切換
 modeBtn.MouseButton1Click:Connect(function()
     modeIndex        = (modeIndex % #MODES) + 1
     values.bombMode  = MODES[modeIndex]
@@ -615,7 +705,6 @@ modeBtn.MouseButton1Click:Connect(function()
     if toggles.bomber then updateStatus() end
 end)
 
--- 開始 / 停止
 startBtn.MouseButton1Click:Connect(function()
     toggles.bomber = not toggles.bomber
     if toggles.bomber then
@@ -639,11 +728,6 @@ startBtn.MouseButton1Click:Connect(function()
     updateStatus()
 end)
 
--- ============================================================
--- 頁面 2：說明
--- ============================================================
-
--- 字體大小列
 local fontRow = Instance.new("Frame")
 fontRow.Size             = UDim2.new(1, 0, 0, 32)
 fontRow.BackgroundColor3 = THEME.bgRow
@@ -676,9 +760,8 @@ fontInput.TextColor3       = THEME.textMain
 fontInput.Parent           = fontRow
 Instance.new("UICorner", fontInput).CornerRadius = UDim.new(0, 5)
 
--- 說明文字區
 local explainRow = Instance.new("Frame")
-explainRow.Size             = UDim2.new(1, 0, 0, 520)
+explainRow.Size             = UDim2.new(1, 0, 0, 1000)
 explainRow.BackgroundColor3 = THEME.bgRow
 explainRow.LayoutOrder      = 2
 explainRow.Parent           = page2
@@ -698,8 +781,8 @@ explainLabel.Text               =
     "【模式說明】\n" ..
     "狙擊：丟炸彈過10秒後\n" ..
     "會把你傳送到炸彈那炸\n\n" ..
-    "炸虛空：被炸到後能直\n" ..
-    "接傳到虛空\n\n" ..
+    "炸虛空：跟著炸彈直到\n" ..
+    "ragdoll後傳送到虛空\n\n" ..
     "正常丟炸彈：每6.2秒\n" ..
     "丟一次炸彈引爆"
 explainLabel.TextSize         = 12
@@ -718,9 +801,6 @@ fontInput.FocusLost:Connect(function()
     explainLabel.TextSize = v
 end)
 
--- ============================================================
--- 拖曳
--- ============================================================
 local function enableDrag(frame, dragHandle)
     local dragging, dragStart, startPos, dragInput = false, nil, nil, nil
     local function update(input)
@@ -754,7 +834,6 @@ end
 
 enableDrag(mainFrame, titleBar)
 
--- 最小化框
 local miniFrame = Instance.new("Frame")
 miniFrame.Size             = UDim2.new(0, 160, 0, 32)
 miniFrame.Position         = UDim2.new(0.5, -80, 0, 30)
@@ -810,4 +889,18 @@ closeButton.MouseButton1Click:Connect(function()
     screenGui:Destroy()
 end)
 
-print("貓玲的炸彈腳本 v1.0 已載入!")
+-- 角色重生後的自動傳送功能
+-- 玩家角色重新載入完成後，若1秒內沒有任何工具則自動傳送到 Teleport1
+player.CharacterAdded:Connect(function(char)
+    task.wait(1)
+    if not hasTool() then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            pcall(function()
+                hrp.CFrame = Workspace.Lobby.Teleport1.CFrame
+            end)
+        end
+    end
+end)
+
+print("貓玲的炸彈腳本 v1.3 已載入!")
