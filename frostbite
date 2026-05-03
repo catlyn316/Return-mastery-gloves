@@ -1,0 +1,1375 @@
+-- 貓玲的霜凍腳本 v1.1
+local CoreGui          = game:GetService("CoreGui")
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local player           = Players.LocalPlayer
+local playerGui        = player:WaitForChild("PlayerGui")
+local Workspace        = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+
+-- 清理舊 GUI
+pcall(function() if CoreGui:FindFirstChild("FrostUI") then CoreGui.FrostUI:Destroy() end end)
+pcall(function() if playerGui:FindFirstChild("FrostUI") then playerGui.FrostUI:Destroy() end end)
+pcall(function()
+    if type(gethui) == "function" then
+        local hui = gethui()
+        if hui and hui:FindFirstChild("FrostUI") then hui.FrostUI:Destroy() end
+    end
+end)
+
+-- ============================================================
+-- 冰藍主題色
+-- ============================================================
+local THEME = {
+    primary     = Color3.fromRGB(100, 210, 255),
+    primaryDark = Color3.fromRGB( 50, 150, 210),
+    accent      = Color3.fromRGB(215, 245, 255),
+    bg          = Color3.fromRGB(  5,  12,  24),
+    bgRow       = Color3.fromRGB( 14,  26,  48),
+    bgInput     = Color3.fromRGB( 20,  38,  64),
+    titleBg     = Color3.fromRGB(  8,  16,  32),
+    tabBg       = Color3.fromRGB( 16,  30,  56),
+    tabActive   = Color3.fromRGB( 30,  80, 140),
+    textMain    = Color3.fromRGB(220, 240, 255),
+    textSub     = Color3.fromRGB(150, 205, 240),
+    textMuted   = Color3.fromRGB( 90, 150, 200),
+    red         = Color3.fromRGB(200,  45,  45),
+    statusBg    = Color3.fromRGB(  6,  12,  24),
+}
+
+-- ============================================================
+-- 狀態
+-- ============================================================
+local toggles = {
+    autoAbility   = false,
+    autoAttack    = false,
+    manualAbility = false,
+    fixedPos      = false,
+    speed         = false,
+}
+
+local values = {
+    abilityInterval = 5.1,
+    fixedCFrame     = nil,
+    speed           = 25,
+}
+
+local connections = {
+    autoAbility = nil,
+    autoAttack  = nil,
+    fixedPos    = nil,
+    speed       = nil,
+    circle      = nil,
+}
+
+local originalSpeed = 16
+
+-- ============================================================
+-- 輔助函數
+-- ============================================================
+local function getNearestTarget()
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    local myPos = char.HumanoidRootPart.Position
+    local nearest, minDist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local d = (p.Character.HumanoidRootPart.Position - myPos).Magnitude
+            if d < minDist then minDist = d; nearest = p end
+        end
+    end
+    return nearest
+end
+
+-- ── 移速套用 ──
+local function applySpeed(char)
+    if not char then char = player.Character end
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    if connections.speed then connections.speed:Disconnect(); connections.speed = nil end
+    if toggles.speed then
+        hum.WalkSpeed = values.speed
+        connections.speed = hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+            if toggles.speed then hum.WalkSpeed = values.speed end
+        end)
+    else
+        hum.WalkSpeed = originalSpeed
+    end
+end
+
+-- ── 確認裝備 Frostbite ──
+local function ensureFrostbite(callback)
+    task.spawn(function()
+        local function getGlove()
+            for _, name in ipairs({"leaderstats","Leaderboard","leaderboard"}) do
+                local lb = player:FindFirstChild(name)
+                if lb then
+                    local g = lb:FindFirstChild("Glove")
+                    if g then return g.Value end
+                end
+            end
+            return nil
+        end
+
+        if getGlove() == "Frostbite" then
+            if callback then callback() end
+            return
+        end
+
+        pcall(function() player.Reset:FireServer() end)
+
+        local timeout = tick()
+        while tick() - timeout < 15 do
+            task.wait(0.2)
+            local hasTool = false
+            local char = player.Character
+            if char then
+                for _, obj in ipairs(char:GetChildren()) do
+                    if obj:IsA("Tool") then hasTool = true; break end
+                end
+            end
+            local bp = player:FindFirstChildOfClass("Backpack")
+            if bp then
+                for _, obj in ipairs(bp:GetChildren()) do
+                    if obj:IsA("Tool") then hasTool = true; break end
+                end
+            end
+            if not hasTool then
+                task.wait(0.3)
+                pcall(function()
+                    fireclickdetector(Workspace.Lobby["Frostbite"].ClickDetector)
+                end)
+                break
+            end
+        end
+
+        if callback then callback() end
+    end)
+end
+
+-- ============================================================
+-- 範圍圓指示器（手動模式專用）
+-- 半徑 45 studs：紅 = 範圍內 <3 人，綠 = ≥3 人
+-- ============================================================
+local circleIndicator = nil
+
+local function createCircleIndicator()
+    if circleIndicator then circleIndicator:Destroy() end
+
+    local part = Instance.new("Part")
+    part.Name        = "FrostCircle"
+    part.Shape       = Enum.PartType.Cylinder
+    part.Size        = Vector3.new(90, 0.3, 90)
+    part.Anchored    = true
+    part.CanCollide  = false
+    pcall(function() part.CanQuery = false end)
+    part.Material    = Enum.Material.Neon
+    part.Transparency = 0.65
+    part.Color       = Color3.fromRGB(200, 45, 45)
+    part.CastShadow  = false
+    part.Parent      = Workspace
+    circleIndicator  = part
+
+    connections.circle = RunService.Heartbeat:Connect(function()
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+        local hrp = char.HumanoidRootPart
+
+        part.CFrame = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
+
+        local count = 0
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                if (p.Character.HumanoidRootPart.Position - hrp.Position).Magnitude <= 45 then
+                    count = count + 1
+                end
+            end
+        end
+
+        if count >= 3 then
+            part.Color        = Color3.fromRGB(45, 200, 45)
+            part.Transparency = 0.55
+        else
+            part.Color        = Color3.fromRGB(200, 45, 45)
+            part.Transparency = 0.65
+        end
+    end)
+end
+
+local function destroyCircleIndicator()
+    if connections.circle then
+        connections.circle:Disconnect()
+        connections.circle = nil
+    end
+    if circleIndicator then
+        circleIndicator:Destroy()
+        circleIndicator = nil
+    end
+end
+
+-- ============================================================
+-- ESP + 面向面板（手動模式開啟時建立，關閉時銷毀）
+-- ============================================================
+local espPanelGui          = nil
+local espPanelConnections  = {}
+local espCleanupFn         = nil
+
+local function destroyESPPanel()
+    if espCleanupFn then
+        pcall(espCleanupFn)
+        espCleanupFn = nil
+    end
+    for _, conn in ipairs(espPanelConnections) do
+        pcall(function()
+            if typeof(conn) == "RBXScriptConnection" then conn:Disconnect() end
+        end)
+    end
+    espPanelConnections = {}
+    if espPanelGui and espPanelGui.Parent then
+        espPanelGui:Destroy()
+        espPanelGui = nil
+    end
+end
+
+local function createESPPanel()
+    destroyESPPanel()
+
+    task.spawn(function()
+        pcall(function()
+            local Tw  = game:GetService("TweenService")
+            local Plrs = Players
+            local RS   = RunService
+            local Wk   = Workspace
+            local plr  = player
+
+            local gui = Instance.new("ScreenGui")
+            gui.Name            = "FrostESPUI"
+            gui.ResetOnSpawn    = false
+            gui.IgnoreGuiInset  = true
+            gui.ZIndexBehavior  = Enum.ZIndexBehavior.Global
+            gui.DisplayOrder    = 10002
+
+            local function parentG(g)
+                local ok = false
+                if not ok then ok = pcall(function()
+                    if type(gethui)=="function" then g.Parent=gethui() else error() end
+                end) end
+                if not ok then ok = pcall(function() g.Parent = CoreGui end) end
+                if not ok then g.Parent = playerGui end
+            end
+            parentG(gui)
+            espPanelGui = gui
+
+            local lockMode        = "none"
+            local rotCon          = nil
+            local mouseClickConn  = nil
+            local targetPlayer    = nil
+            local lastClickTime   = 0
+            local lastClickedPlayer = nil
+
+            local nearBtn, clickBtn, espBtnRef, centerBtn
+
+            local espEnabled = false
+            local espLabels  = {}
+            local espBoxes   = {}
+            local espConn    = nil
+
+            local function updateButtonState(button, active)
+                if not (button and button.Parent) then return end
+                Tw:Create(button, TweenInfo.new(0.2), {
+                    BackgroundColor3 = active
+                        and Color3.fromRGB(50,100,150)
+                        or  Color3.fromRGB(40,40,45)
+                }):Play()
+                local s = button:FindFirstChild("BtnStroke")
+                if s then
+                    Tw:Create(s, TweenInfo.new(0.2), {
+                        Color     = active and Color3.fromRGB(0,200,255) or Color3.fromRGB(80,80,90),
+                        Thickness = active and 2 or 1
+                    }):Play()
+                end
+            end
+
+            local function getParts()
+                local c   = plr.Character
+                if not c then return nil, nil, nil end
+                local hum = c:FindFirstChildOfClass("Humanoid")
+                local hrp = c:FindFirstChild("HumanoidRootPart")
+                return c, hum, hrp
+            end
+
+            local function clearAllModes()
+                if rotCon          then rotCon:Disconnect();         rotCon         = nil end
+                if mouseClickConn  then mouseClickConn:Disconnect(); mouseClickConn = nil end
+                pcall(function()
+                    local _, h, _ = getParts()
+                    if h then h.AutoRotate = true end
+                end)
+                updateButtonState(nearBtn,   false)
+                updateButtonState(clickBtn,  false)
+                updateButtonState(centerBtn, false)
+                lockMode          = "none"
+                targetPlayer      = nil
+                lastClickedPlayer = nil
+            end
+
+            local function cleanupESP(p)
+                if espLabels[p] then
+                    if espLabels[p].billboard then espLabels[p].billboard:Destroy() end
+                    espLabels[p] = nil
+                end
+                if espBoxes[p] then espBoxes[p]:Destroy(); espBoxes[p] = nil end
+            end
+
+            espCleanupFn = function()
+                clearAllModes()
+                if espConn then espConn:Disconnect(); espConn = nil end
+                for p in pairs(espLabels) do cleanupESP(p) end
+            end
+
+            local function setFaceRotation(ftype, target)
+                if rotCon then rotCon:Disconnect(); rotCon = nil end
+                pcall(function()
+                    local _, h, _ = getParts()
+                    if h then h.AutoRotate = false end
+                end)
+
+                rotCon = RS.RenderStepped:Connect(function()
+                    pcall(function()
+                        local _, _, myHRP = getParts()
+                        if not myHRP then return end
+                        local lookAt = nil
+
+                        if ftype == "nearest" then
+                            local nearest, minD = nil, math.huge
+                            for _, p in ipairs(Plrs:GetPlayers()) do
+                                if p ~= plr and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                                    local d = (myHRP.Position - p.Character.HumanoidRootPart.Position).Magnitude
+                                    if d < minD then minD = d; nearest = p.Character.HumanoidRootPart end
+                                end
+                            end
+                            if nearest then lookAt = nearest.Position end
+
+                        elseif ftype == "click" and target and target.Character then
+                            local pr = target.Character:FindFirstChild("HumanoidRootPart")
+                            if pr then lookAt = pr.Position end
+
+                        elseif ftype == "center" then
+                            lookAt = Vector3.new(0, myHRP.Position.Y, 0)
+                        end
+
+                        if lookAt then
+                            local flat = (lookAt - myHRP.Position) * Vector3.new(1,0,1)
+                            if flat.Magnitude > 0.001 then
+                                myHRP.CFrame = CFrame.lookAt(
+                                    myHRP.Position,
+                                    myHRP.Position + flat.Unit,
+                                    Vector3.yAxis
+                                )
+                            end
+                        end
+                    end)
+                end)
+            end
+
+            local panelWidth = 80
+            local btnH       = 30
+            local btnGap     = 3
+            local numBtns    = 4
+            local expandedH  = numBtns * btnH + (numBtns - 1) * btnGap
+            local toggleBtnH = 28
+
+            local panel = Instance.new("Frame")
+            panel.Name             = "ESPAnchor"
+            panel.AnchorPoint      = Vector2.new(1, 1)
+            panel.Size             = UDim2.fromOffset(panelWidth, toggleBtnH)
+            panel.Position         = UDim2.new(1, -36, 1, -50)
+            panel.BackgroundTransparency = 1
+            panel.ClipsDescendants = false
+            panel.Parent           = gui
+
+            local toggleBtn = Instance.new("TextButton")
+            toggleBtn.AnchorPoint       = Vector2.new(0, 1)
+            toggleBtn.Size              = UDim2.fromOffset(panelWidth, toggleBtnH)
+            toggleBtn.Position          = UDim2.new(0, 0, 1, 0)
+            toggleBtn.BackgroundColor3  = Color3.fromRGB(45,45,55)
+            toggleBtn.Text              = "面向/ESP ▲"
+            toggleBtn.TextSize          = 11
+            toggleBtn.Font              = Enum.Font.GothamBold
+            toggleBtn.TextColor3        = Color3.fromRGB(200,200,220)
+            toggleBtn.AutoButtonColor   = false
+            toggleBtn.Parent            = panel
+            Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0,6)
+
+            local xBtn = Instance.new("TextButton")
+            xBtn.Size              = UDim2.fromOffset(22, 22)
+            xBtn.AnchorPoint       = Vector2.new(0, 1)
+            xBtn.Position          = UDim2.new(1, 4, 1, -3)
+            xBtn.BackgroundColor3  = Color3.fromRGB(200,50,50)
+            xBtn.Text              = "x"
+            xBtn.TextSize          = 13
+            xBtn.Font              = Enum.Font.GothamBold
+            xBtn.TextColor3        = Color3.new(1,1,1)
+            xBtn.AutoButtonColor   = false
+            xBtn.Parent            = panel
+            Instance.new("UICorner", xBtn).CornerRadius = UDim.new(0,5)
+
+            local btnContainer = Instance.new("Frame")
+            btnContainer.AnchorPoint        = Vector2.new(0,1)
+            btnContainer.Size               = UDim2.fromOffset(panelWidth, 0)
+            btnContainer.Position           = UDim2.new(0,0,1,-toggleBtnH)
+            btnContainer.BackgroundTransparency = 1
+            btnContainer.ClipsDescendants   = true
+            btnContainer.Parent             = panel
+
+            local function createExtraBtn(name, idx)
+                local b = Instance.new("TextButton")
+                b.Name              = name
+                b.Size              = UDim2.fromOffset(panelWidth, btnH)
+                b.Position          = UDim2.fromOffset(0, (idx-1)*(btnH+btnGap))
+                b.BackgroundColor3  = Color3.fromRGB(38,38,48)
+                b.Text              = name
+                b.TextSize          = 11
+                b.TextColor3        = Color3.new(1,1,1)
+                b.AutoButtonColor   = false
+                b.Parent            = btnContainer
+                Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+                local s = Instance.new("UIStroke")
+                s.Thickness = 1; s.Color = Color3.fromRGB(70,70,85)
+                s.Name = "BtnStroke"; s.Parent = b
+                return b
+            end
+
+            espBtnRef = createExtraBtn("ESP",      1)
+            nearBtn   = createExtraBtn("面向最近",  2)
+            clickBtn  = createExtraBtn("面向雙擊",  3)
+            centerBtn = createExtraBtn("朝向中央",  4)
+
+            local isExpanded = false
+            local function setExpanded(expand)
+                isExpanded = expand
+                local h = expand and expandedH or 0
+                Tw:Create(btnContainer, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+                    Size = UDim2.fromOffset(panelWidth, h)
+                }):Play()
+                Tw:Create(panel, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+                    Size = UDim2.fromOffset(panelWidth, toggleBtnH + h)
+                }):Play()
+                toggleBtn.Text = expand and "面向/ESP ▼" or "面向/ESP ▲"
+            end
+
+            local isDragging   = false
+            local dragMoved    = false
+            local dragStartPos = nil
+            local panelStart   = nil
+
+            toggleBtn.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                    isDragging   = true
+                    dragMoved    = false
+                    dragStartPos = input.Position
+                    panelStart   = panel.Position
+                    input.Changed:Connect(function()
+                        if input.UserInputState == Enum.UserInputState.End then
+                            isDragging = false
+                        end
+                    end)
+                end
+            end)
+
+            local uisMove = UserInputService.InputChanged:Connect(function(input)
+                if isDragging and (
+                    input.UserInputType == Enum.UserInputType.MouseMovement or
+                    input.UserInputType == Enum.UserInputType.Touch
+                ) then
+                    local delta = input.Position - dragStartPos
+                    if delta.Magnitude > 5 then
+                        dragMoved = true
+                        panel.Position = UDim2.new(
+                            panelStart.X.Scale, panelStart.X.Offset + delta.X,
+                            panelStart.Y.Scale, panelStart.Y.Offset + delta.Y
+                        )
+                    end
+                end
+            end)
+            table.insert(espPanelConnections, uisMove)
+
+            local uisEnd = UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                    isDragging = false
+                end
+            end)
+            table.insert(espPanelConnections, uisEnd)
+
+            toggleBtn.MouseButton1Click:Connect(function()
+                if not dragMoved then setExpanded(not isExpanded) end
+                dragMoved = false
+            end)
+
+            nearBtn.MouseButton1Click:Connect(function()
+                if lockMode == "nearest" then
+                    clearAllModes()
+                else
+                    clearAllModes()
+                    lockMode = "nearest"
+                    updateButtonState(nearBtn, true)
+                    setFaceRotation("nearest")
+                end
+            end)
+
+            clickBtn.MouseButton1Click:Connect(function()
+                if lockMode == "click" then
+                    clearAllModes()
+                else
+                    clearAllModes()
+                    lockMode = "click"
+                    updateButtonState(clickBtn, true)
+                    mouseClickConn = plr:GetMouse().Button1Down:Connect(function()
+                        local mouse = plr:GetMouse()
+                        local cam   = Wk.CurrentCamera
+                        local ray   = cam:ScreenPointToRay(mouse.X, mouse.Y)
+                        local found, minDist = nil, math.huge
+                        for _, p in ipairs(Plrs:GetPlayers()) do
+                            if p ~= plr and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                                local hrp  = p.Character.HumanoidRootPart
+                                local toP  = hrp.Position - ray.Origin
+                                local proj = toP:Dot(ray.Direction.Unit)
+                                if proj > 0 then
+                                    local closest = ray.Origin + ray.Direction.Unit * proj
+                                    local dist    = (hrp.Position - closest).Magnitude
+                                    if dist < 8 and proj < minDist then
+                                        minDist = proj; found = p
+                                    end
+                                end
+                            end
+                        end
+                        if found and found ~= plr then
+                            local now = tick()
+                            if lastClickedPlayer == found and (now - lastClickTime) < 0.5 then
+                                targetPlayer = found
+                                setFaceRotation("click", found)
+                            end
+                            lastClickedPlayer = found
+                            lastClickTime     = now
+                        end
+                    end)
+                end
+            end)
+
+            centerBtn.MouseButton1Click:Connect(function()
+                if lockMode == "center" then
+                    clearAllModes()
+                else
+                    clearAllModes()
+                    lockMode = "center"
+                    updateButtonState(centerBtn, true)
+                    setFaceRotation("center")
+                end
+            end)
+
+            espBtnRef.MouseButton1Click:Connect(function()
+                espEnabled = not espEnabled
+                updateButtonState(espBtnRef, espEnabled)
+                if not espEnabled then
+                    if espConn then espConn:Disconnect(); espConn = nil end
+                    for p in pairs(espLabels) do cleanupESP(p) end
+                else
+                    espConn = RS.RenderStepped:Connect(function()
+                        pcall(function()
+                            local _, _, myHRP = getParts()
+                            for _, p in ipairs(Plrs:GetPlayers()) do
+                                if p ~= plr then
+                                    local char = p.Character
+                                    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+                                    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+                                    if char and hrp and hum and hum.Health > 0 then
+                                        if not espLabels[p] then
+                                            local bg = Instance.new("BillboardGui")
+                                            bg.Size         = UDim2.fromOffset(200, 70)
+                                            bg.AlwaysOnTop  = true
+                                            bg.StudsOffset  = Vector3.new(0, 3, 0)
+                                            bg.Parent       = gui
+                                            local tl = Instance.new("TextLabel")
+                                            tl.Size                = UDim2.fromScale(1,1)
+                                            tl.BackgroundTransparency = 1
+                                            tl.TextColor3          = Color3.new(1,1,1)
+                                            tl.TextStrokeTransparency = 0.5
+                                            tl.TextSize            = 14
+                                            tl.Font                = Enum.Font.SourceSansBold
+                                            tl.TextXAlignment      = Enum.TextXAlignment.Center
+                                            tl.Parent              = bg
+                                            espLabels[p] = {billboard = bg, label = tl}
+                                        end
+                                        if not espBoxes[p] then
+                                            local box = Instance.new("BoxHandleAdornment")
+                                            box.Name         = "ESPBox"
+                                            box.AlwaysOnTop  = true
+                                            box.ZIndex       = 1
+                                            box.Transparency = 0.7
+                                            box.Color3       = Color3.new(1,1,1)
+                                            box.Parent       = gui
+                                            espBoxes[p] = box
+                                        end
+                                        local glove, slaps = "?", "?"
+                                        local ls = p:FindFirstChild("leaderstats")
+                                        if ls then
+                                            local g = ls:FindFirstChild("Glove")
+                                            local s = ls:FindFirstChild("Slaps")
+                                            if g then glove = tostring(g.Value) end
+                                            if s then slaps = tostring(s.Value) end
+                                        end
+                                        local dist = myHRP and (myHRP.Position - hrp.Position).Magnitude or 0
+                                        local lab  = espLabels[p]
+                                        lab.billboard.Adornee = hrp
+                                        lab.label.Text = string.format(
+                                            "名: %s\n%s / %s\n血量: %.0f/%.0f\n距離: %.1f",
+                                            p.Name, glove, slaps,
+                                            hum.Health, hum.MaxHealth, dist
+                                        )
+                                        espBoxes[p].Adornee = char
+                                        espBoxes[p].Size    = char:GetExtentsSize()
+                                    else
+                                        cleanupESP(p)
+                                    end
+                                end
+                            end
+                            for p in pairs(espLabels) do
+                                if not Plrs:FindFirstChild(p.Name) then cleanupESP(p) end
+                            end
+                        end)
+                    end)
+                end
+            end)
+
+            xBtn.MouseButton1Click:Connect(function()
+                clearAllModes()
+                if espConn then espConn:Disconnect(); espConn = nil end
+                for p in pairs(espLabels) do cleanupESP(p) end
+                if gui and gui.Parent then gui:Destroy(); espPanelGui = nil end
+                espCleanupFn = nil
+            end)
+
+            local charAddConn = plr.CharacterAdded:Connect(function()
+                task.wait(0.5)
+                if lockMode ~= "none" then
+                    setFaceRotation(lockMode, targetPlayer)
+                end
+            end)
+            table.insert(espPanelConnections, charAddConn)
+        end)
+    end)
+end
+
+-- ============================================================
+-- UI 建構
+-- ============================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name           = "FrostUI"
+screenGui.ResetOnSpawn   = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+screenGui.DisplayOrder   = 10001
+
+local function parentUI(g)
+    local ok = false
+    if not ok then ok = pcall(function() if type(gethui)=="function" then g.Parent=gethui() else error() end end) end
+    if not ok then ok = pcall(function() g.Parent = CoreGui end) end
+    if not ok then g.Parent = playerGui end
+end
+parentUI(screenGui)
+
+-- 主框架
+local mainFrame = Instance.new("Frame")
+mainFrame.Size             = UDim2.new(0, 280, 0, 300)
+mainFrame.Position         = UDim2.new(0.5, -140, 0.5, -150)
+mainFrame.BackgroundColor3 = THEME.bg
+mainFrame.BorderSizePixel  = 0
+mainFrame.Parent           = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
+
+local stroke = Instance.new("UIStroke")
+stroke.Color     = THEME.primaryDark
+stroke.Thickness = 1.5
+stroke.Parent    = mainFrame
+
+-- 標題欄
+local titleBar = Instance.new("Frame")
+titleBar.Size             = UDim2.new(1, 0, 0, 32)
+titleBar.BackgroundColor3 = THEME.titleBg
+titleBar.Parent           = mainFrame
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel")
+title.Size               = UDim2.new(1, -60, 1, 0)
+title.BackgroundTransparency = 1
+title.Text               = "貓玲的霜凍腳本  v1.1"
+title.TextSize           = 14
+title.Font               = Enum.Font.GothamBold
+title.TextColor3         = THEME.accent
+title.Parent             = titleBar
+
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size             = UDim2.new(0, 24, 0, 24)
+minimizeButton.Position         = UDim2.new(1, -54, 0, 4)
+minimizeButton.BackgroundColor3 = THEME.tabActive
+minimizeButton.Text             = "─"
+minimizeButton.TextColor3       = THEME.textMain
+minimizeButton.Parent           = titleBar
+Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 5)
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size             = UDim2.new(0, 24, 0, 24)
+closeButton.Position         = UDim2.new(1, -28, 0, 4)
+closeButton.BackgroundColor3 = THEME.red
+closeButton.Text             = "X"
+closeButton.TextColor3       = Color3.fromRGB(255, 255, 255)
+closeButton.Parent           = titleBar
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 5)
+
+-- 分頁標籤
+local tabBar = Instance.new("Frame")
+tabBar.Size             = UDim2.new(0.9, 0, 0, 28)
+tabBar.Position         = UDim2.new(0.05, 0, 0, 38)
+tabBar.BackgroundColor3 = THEME.tabBg
+tabBar.Parent           = mainFrame
+Instance.new("UICorner", tabBar).CornerRadius = UDim.new(0, 6)
+
+local function createTab(text, index, total)
+    local w   = 1 / total
+    local tab = Instance.new("TextButton")
+    tab.Size             = UDim2.new(w, -4, 1, -4)
+    tab.Position         = UDim2.new((index - 1) * w, 2, 0, 2)
+    tab.BackgroundColor3 = THEME.tabBg
+    tab.Text             = text
+    tab.TextSize         = 12
+    tab.Font             = Enum.Font.GothamBold
+    tab.TextColor3       = THEME.textMuted
+    tab.Parent           = tabBar
+    Instance.new("UICorner", tab).CornerRadius = UDim.new(0, 4)
+    return tab
+end
+
+local tab1 = createTab("攻擊", 1, 3)
+local tab2 = createTab("幫助", 2, 3)
+local tab3 = createTab("說明", 3, 3)
+
+local contentContainer = Instance.new("Frame")
+contentContainer.Size             = UDim2.new(0.9, 0, 0, 200)
+contentContainer.Position         = UDim2.new(0.05, 0, 0, 72)
+contentContainer.BackgroundTransparency = 1
+contentContainer.ClipsDescendants = true
+contentContainer.Parent           = mainFrame
+
+local function createScrollingPage(parent)
+    local page = Instance.new("ScrollingFrame")
+    page.Size                = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel     = 0
+    page.ScrollBarThickness  = 4
+    page.ScrollBarImageColor3= THEME.primary
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.Visible             = false
+    page.Parent              = parent
+    local layout = Instance.new("UIListLayout")
+    layout.Padding           = UDim.new(0, 6)
+    layout.SortOrder         = Enum.SortOrder.LayoutOrder
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.Parent            = page
+    local padding = Instance.new("UIPadding")
+    padding.PaddingRight     = UDim.new(0, 6)
+    padding.Parent           = page
+    return page
+end
+
+local page1 = createScrollingPage(contentContainer)
+local page2 = createScrollingPage(contentContainer)
+local page3 = createScrollingPage(contentContainer)
+page1.Visible = true
+
+local function switchTab(n)
+    page1.Visible = (n == 1)
+    page2.Visible = (n == 2)
+    page3.Visible = (n == 3)
+    local tabs = {tab1, tab2, tab3}
+    for i, t in ipairs(tabs) do
+        t.BackgroundColor3 = (i == n) and THEME.tabActive or THEME.tabBg
+        t.TextColor3       = (i == n) and THEME.textMain  or THEME.textMuted
+    end
+end
+
+tab1.MouseButton1Click:Connect(function() switchTab(1) end)
+tab2.MouseButton1Click:Connect(function() switchTab(2) end)
+tab3.MouseButton1Click:Connect(function() switchTab(3) end)
+switchTab(1)
+
+-- ============================================================
+-- 共用 UI 元件函數
+-- ============================================================
+local function createRow(parent, labelText, statusText, btnText, order)
+    local frame = Instance.new("Frame")
+    frame.Size             = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = THEME.bgRow
+    frame.LayoutOrder      = order or 0
+    frame.Parent           = parent
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+
+    local label = Instance.new("TextLabel")
+    label.Size               = UDim2.new(0, 95, 1, 0)
+    label.Position           = UDim2.new(0, 6, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text               = labelText
+    label.TextSize           = 12
+    label.Font               = Enum.Font.GothamBold
+    label.TextColor3         = THEME.textSub
+    label.TextXAlignment     = Enum.TextXAlignment.Left
+    label.Parent             = frame
+
+    local status = Instance.new("TextLabel")
+    status.Size              = UDim2.new(0, 60, 0, 22)
+    status.Position          = UDim2.new(0, 102, 0, 5)
+    status.BackgroundTransparency = 1
+    status.Text              = statusText or "關閉"
+    status.TextSize          = 11
+    status.Font              = Enum.Font.Gotham
+    status.TextColor3        = THEME.textMuted
+    status.TextXAlignment    = Enum.TextXAlignment.Left
+    status.Parent            = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, 50, 0, 22)
+    btn.Position         = UDim2.new(1, -55, 0, 5)
+    btn.BackgroundColor3 = THEME.primary
+    btn.Text             = btnText or "啟動"
+    btn.TextSize         = 12
+    btn.Font             = Enum.Font.GothamBold
+    btn.TextColor3       = Color3.fromRGB(255, 255, 255)
+    btn.Parent           = frame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+    return frame, status, btn
+end
+
+local function createInputRow(parent, labelText, defaultVal, unitText, order)
+    local frame = Instance.new("Frame")
+    frame.Size             = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = THEME.bgRow
+    frame.LayoutOrder      = order or 0
+    frame.Parent           = parent
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+
+    local label = Instance.new("TextLabel")
+    label.Size               = UDim2.new(0, 85, 1, 0)
+    label.Position           = UDim2.new(0, 6, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text               = labelText
+    label.TextSize           = 12
+    label.Font               = Enum.Font.GothamBold
+    label.TextColor3         = THEME.textSub
+    label.TextXAlignment     = Enum.TextXAlignment.Left
+    label.Parent             = frame
+
+    local input = Instance.new("TextBox")
+    input.Size             = UDim2.new(0, 100, 0, 22)
+    input.Position         = UDim2.new(0, 90, 0, 5)
+    input.BackgroundColor3 = THEME.bgInput
+    input.BorderSizePixel  = 1
+    input.BorderColor3     = THEME.primaryDark
+    input.Text             = defaultVal
+    input.TextSize         = 12
+    input.Font             = Enum.Font.Gotham
+    input.TextColor3       = THEME.textMain
+    input.Parent           = frame
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 5)
+
+    local unit = Instance.new("TextLabel")
+    unit.Size              = UDim2.new(0, 40, 0, 22)
+    unit.Position          = UDim2.new(0, 195, 0, 5)
+    unit.BackgroundTransparency = 1
+    unit.Text              = unitText
+    unit.TextSize          = 12
+    unit.Font              = Enum.Font.Gotham
+    unit.TextColor3        = THEME.textMuted
+    unit.TextXAlignment    = Enum.TextXAlignment.Left
+    unit.Parent            = frame
+
+    return frame, input
+end
+
+local function createSpeedRow(parent, order)
+    local frame = Instance.new("Frame")
+    frame.Size             = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = THEME.bgRow
+    frame.LayoutOrder      = order or 0
+    frame.Parent           = parent
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+
+    local label = Instance.new("TextLabel")
+    label.Size               = UDim2.new(0, 42, 1, 0)
+    label.Position           = UDim2.new(0, 6, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text               = "移速:"
+    label.TextSize           = 12
+    label.Font               = Enum.Font.GothamBold
+    label.TextColor3         = THEME.textSub
+    label.TextXAlignment     = Enum.TextXAlignment.Left
+    label.Parent             = frame
+
+    local input = Instance.new("TextBox")
+    input.Size             = UDim2.new(0, 72, 0, 22)
+    input.Position         = UDim2.new(0, 50, 0, 5)
+    input.BackgroundColor3 = THEME.bgInput
+    input.BorderSizePixel  = 1
+    input.BorderColor3     = THEME.primaryDark
+    input.Text             = "25"
+    input.TextSize         = 12
+    input.Font             = Enum.Font.Gotham
+    input.TextColor3       = THEME.textMain
+    input.Parent           = frame
+    Instance.new("UICorner", input).CornerRadius = UDim.new(0, 5)
+
+    local status = Instance.new("TextLabel")
+    status.Size              = UDim2.new(0, 34, 0, 22)
+    status.Position          = UDim2.new(0, 128, 0, 5)
+    status.BackgroundTransparency = 1
+    status.Text              = "關閉"
+    status.TextSize          = 11
+    status.Font              = Enum.Font.Gotham
+    status.TextColor3        = THEME.textMuted
+    status.TextXAlignment    = Enum.TextXAlignment.Left
+    status.Parent            = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, 50, 0, 22)
+    btn.Position         = UDim2.new(1, -55, 0, 5)
+    btn.BackgroundColor3 = THEME.primary
+    btn.Text             = "啟動"
+    btn.TextSize         = 12
+    btn.Font             = Enum.Font.GothamBold
+    btn.TextColor3       = Color3.fromRGB(255, 255, 255)
+    btn.Parent           = frame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+    return frame, input, status, btn
+end
+
+-- ============================================================
+-- 頁面1：攻擊
+-- ============================================================
+local autoAbilityFrame,   autoAbilityStatus,   autoAbilityBtn   = createRow(page1, "自動使用能力:", "關閉", "啟動", 1)
+local abilityIntervalFrame, abilityIntervalInput                 = createInputRow(page1, "能力間隔:", "5.1", "秒", 2)
+local autoAttackFrame,    autoAttackStatus,    autoAttackBtn    = createRow(page1, "自動攻擊:", "關閉", "啟動", 3)
+local manualAbilityFrame, manualAbilityStatus, manualAbilityBtn = createRow(page1, "手動能力模式:", "關閉", "啟動", 4)
+local speedFrame, speedInput, speedStatus, speedBtn = createSpeedRow(page1, 5)
+
+-- ============================================================
+-- 頁面2：幫助
+-- ============================================================
+local fixedPosFrame, fixedPosStatus, fixedPosBtn = createRow(page2, "固定位置:", "關閉", "啟動", 1)
+
+-- ============================================================
+-- 頁面3：說明
+-- ============================================================
+local descFontRow = Instance.new("Frame")
+descFontRow.Size             = UDim2.new(1, 0, 0, 32)
+descFontRow.BackgroundColor3 = THEME.bgRow
+descFontRow.LayoutOrder      = 1
+descFontRow.Parent           = page3
+Instance.new("UICorner", descFontRow).CornerRadius = UDim.new(0, 6)
+
+local descFontLabel = Instance.new("TextLabel")
+descFontLabel.Size               = UDim2.new(0, 80, 1, 0)
+descFontLabel.Position           = UDim2.new(0, 6, 0, 0)
+descFontLabel.BackgroundTransparency = 1
+descFontLabel.Text               = "字體大小:"
+descFontLabel.TextSize           = 12
+descFontLabel.Font               = Enum.Font.GothamBold
+descFontLabel.TextColor3         = THEME.textSub
+descFontLabel.TextXAlignment     = Enum.TextXAlignment.Left
+descFontLabel.TextYAlignment     = Enum.TextYAlignment.Center
+descFontLabel.Parent             = descFontRow
+
+local descFontInput = Instance.new("TextBox")
+descFontInput.Size             = UDim2.new(0, 60, 0, 22)
+descFontInput.Position         = UDim2.new(0, 88, 0, 5)
+descFontInput.BackgroundColor3 = THEME.bgInput
+descFontInput.BorderSizePixel  = 1
+descFontInput.BorderColor3     = THEME.primaryDark
+descFontInput.Text             = "12"
+descFontInput.TextSize         = 12
+descFontInput.Font             = Enum.Font.Gotham
+descFontInput.TextColor3       = THEME.textMain
+descFontInput.Parent           = descFontRow
+Instance.new("UICorner", descFontInput).CornerRadius = UDim.new(0, 5)
+
+local descTextRow = Instance.new("Frame")
+descTextRow.Size             = UDim2.new(1, 0, 0, 370)
+descTextRow.BackgroundColor3 = THEME.bgRow
+descTextRow.LayoutOrder      = 2
+descTextRow.Parent           = page3
+Instance.new("UICorner", descTextRow).CornerRadius = UDim.new(0, 6)
+
+local descLabel = Instance.new("TextLabel")
+descLabel.Size               = UDim2.new(1, -16, 1, -16)
+descLabel.Position           = UDim2.new(0, 8, 0, 8)
+descLabel.BackgroundTransparency = 1
+descLabel.Text =
+    "【手動能力模式】\n" ..
+    "開啟後螢幕右側出現圓形「發動」按鈕\n" ..
+    "同時啟動 ESP + 面向控制面板\n" ..
+    "地面出現半透明圓（半徑 45）\n" ..
+    "  紅色 = 範圍內 <3 名玩家\n" ..
+    "  綠色 = 範圍內 ≥3 名玩家\n\n" ..
+    "【自動使用能力】\n" ..
+    "每隔設定秒數自動發動一次能力\n\n" ..
+    "【自動攻擊】\n" ..
+    "每 0.8 秒對最近的玩家自動攻擊\n\n" ..
+    "【移速】\n" ..
+    "輸入想要的速度值後按啟動\n" ..
+    "即時套用，角色重生後自動恢復\n\n" ..
+    "【固定位置（幫助分頁）】\n" ..
+    "記錄目前位置並持續鎖定在那裡\n" ..
+    "可用來讓自己站在幫助點不移位\n\n" ..
+    "【Frostbite 自動裝備】\n" ..
+    "開啟任一攻擊功能時，若目前手套\n" ..
+    "不是 Frostbite 會自動重置並裝備"
+descLabel.TextSize       = 12
+descLabel.Font           = Enum.Font.Gotham
+descLabel.TextColor3     = THEME.textMain
+descLabel.TextXAlignment = Enum.TextXAlignment.Left
+descLabel.TextYAlignment = Enum.TextYAlignment.Top
+descLabel.TextWrapped    = true
+descLabel.LineHeight     = 1.3
+descLabel.Parent         = descTextRow
+
+descFontInput.FocusLost:Connect(function()
+    local v = tonumber(descFontInput.Text)
+    v = v and math.clamp(v, 8, 24) or 12
+    descFontInput.Text = tostring(v)
+    descLabel.TextSize = v
+end)
+
+-- ============================================================
+-- 狀態欄
+-- ============================================================
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size             = UDim2.new(0.9, 0, 0, 26)
+statusLabel.Position         = UDim2.new(0.05, 0, 1, -32)
+statusLabel.BackgroundColor3 = THEME.statusBg
+statusLabel.Text             = "系統就緒"
+statusLabel.TextSize         = 11
+statusLabel.Font             = Enum.Font.GothamBold
+statusLabel.TextColor3       = THEME.primary
+statusLabel.Parent           = mainFrame
+Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
+
+local function updateStatus()
+    local active = {}
+    if toggles.autoAbility   then table.insert(active, "自動能力") end
+    if toggles.autoAttack    then table.insert(active, "自動攻擊") end
+    if toggles.manualAbility then table.insert(active, "手動能力") end
+    if toggles.fixedPos      then table.insert(active, "固定位置") end
+    if toggles.speed         then table.insert(active, "移速") end
+    if #active > 0 then
+        statusLabel.Text     = "✅ " .. table.concat(active, " | ")
+        statusLabel.TextColor3 = THEME.accent
+    else
+        statusLabel.Text     = "系統就緒"
+        statusLabel.TextColor3 = THEME.primary
+    end
+end
+
+local function setRowActive(btn, frame, status, isActive, activeText, inactiveText)
+    if isActive then
+        btn.Text             = "解除"
+        btn.BackgroundColor3 = THEME.red
+        frame.BackgroundColor3 = Color3.fromRGB(10, 22, 42)
+        if status then status.Text = activeText or "運行中"; status.TextColor3 = THEME.accent end
+    else
+        btn.Text             = "啟動"
+        btn.BackgroundColor3 = THEME.primary
+        frame.BackgroundColor3 = THEME.bgRow
+        if status then status.Text = inactiveText or "關閉"; status.TextColor3 = THEME.textMuted end
+    end
+    updateStatus()
+end
+
+-- ============================================================
+-- 手動能力圓形按鈕
+-- ============================================================
+local manualBtnObj       = nil
+local manualCooldownTask = nil
+
+local function destroyManualBtn()
+    if manualCooldownTask then task.cancel(manualCooldownTask); manualCooldownTask = nil end
+    if manualBtnObj and manualBtnObj.Parent then manualBtnObj:Destroy(); manualBtnObj = nil end
+end
+
+local function createManualBtn()
+    destroyManualBtn()
+
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, 72, 0, 72)
+    btn.Position         = UDim2.new(1, -90, 0.5, -36)
+    btn.BackgroundColor3 = THEME.primaryDark
+    btn.Text             = "發動"
+    btn.TextSize         = 16
+    btn.Font             = Enum.Font.GothamBold
+    btn.TextColor3       = Color3.fromRGB(255, 255, 255)
+    btn.ZIndex           = 20
+    btn.Parent           = screenGui
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(1, 0)
+    local btnStroke = Instance.new("UIStroke")
+    btnStroke.Color     = THEME.primary
+    btnStroke.Thickness = 2
+    btnStroke.Parent    = btn
+
+    local isCooling = false
+    btn.MouseButton1Click:Connect(function()
+        if isCooling then return end
+        isCooling = true
+        pcall(function() ReplicatedStorage.GeneralAbility:FireServer(0.3) end)
+        btn.BackgroundColor3 = Color3.fromRGB(30, 50, 90)
+        local cooldown = values.abilityInterval
+        manualCooldownTask = task.spawn(function()
+            local t0 = tick()
+            while tick() - t0 < cooldown do
+                if not (btn and btn.Parent) then return end
+                btn.Text = tostring(math.ceil(cooldown - (tick() - t0)))
+                task.wait(0.1)
+            end
+            if btn and btn.Parent then
+                btn.Text             = "發動"
+                btn.BackgroundColor3 = THEME.primaryDark
+            end
+            isCooling = false
+            manualCooldownTask = nil
+        end)
+    end)
+
+    manualBtnObj = btn
+end
+
+-- ============================================================
+-- 攻擊迴圈
+-- ============================================================
+local function runAutoAbility()
+    while toggles.autoAbility do
+        task.wait(values.abilityInterval)
+        if not toggles.autoAbility then break end
+        pcall(function() ReplicatedStorage.GeneralAbility:FireServer(0.3) end)
+    end
+end
+
+local function runAutoAttack()
+    while toggles.autoAttack do
+        task.wait(0.8)
+        if not toggles.autoAttack then break end
+        pcall(function()
+            local nearest = getNearestTarget()
+            if nearest and nearest.Character then
+                local torso = nearest.Character:FindFirstChild("Torso")
+                if torso then ReplicatedStorage.GeneralHit:FireServer(torso) end
+            end
+        end)
+    end
+end
+
+-- ============================================================
+-- 按鈕事件：攻擊分頁
+-- ============================================================
+autoAbilityBtn.MouseButton1Click:Connect(function()
+    toggles.autoAbility = not toggles.autoAbility
+    setRowActive(autoAbilityBtn, autoAbilityFrame, autoAbilityStatus, toggles.autoAbility, "運行中", "關閉")
+    if toggles.autoAbility then
+        ensureFrostbite(function()
+            if toggles.autoAbility then connections.autoAbility = task.spawn(runAutoAbility) end
+        end)
+    else
+        if connections.autoAbility then task.cancel(connections.autoAbility); connections.autoAbility = nil end
+    end
+end)
+
+autoAttackBtn.MouseButton1Click:Connect(function()
+    toggles.autoAttack = not toggles.autoAttack
+    setRowActive(autoAttackBtn, autoAttackFrame, autoAttackStatus, toggles.autoAttack, "運行中", "關閉")
+    if toggles.autoAttack then
+        ensureFrostbite(function()
+            if toggles.autoAttack then connections.autoAttack = task.spawn(runAutoAttack) end
+        end)
+    else
+        if connections.autoAttack then task.cancel(connections.autoAttack); connections.autoAttack = nil end
+    end
+end)
+
+manualAbilityBtn.MouseButton1Click:Connect(function()
+    toggles.manualAbility = not toggles.manualAbility
+    setRowActive(manualAbilityBtn, manualAbilityFrame, manualAbilityStatus, toggles.manualAbility, "運行中", "關閉")
+    if toggles.manualAbility then
+        ensureFrostbite(function()
+            if not toggles.manualAbility then return end
+            createManualBtn()
+            createCircleIndicator()
+            createESPPanel()
+        end)
+    else
+        destroyManualBtn()
+        destroyCircleIndicator()
+        destroyESPPanel()
+    end
+end)
+
+abilityIntervalInput.FocusLost:Connect(function()
+    local val = tonumber(abilityIntervalInput.Text)
+    if val and val > 0 then
+        values.abilityInterval = val
+    else
+        abilityIntervalInput.Text = tostring(values.abilityInterval)
+    end
+end)
+
+speedBtn.MouseButton1Click:Connect(function()
+    toggles.speed = not toggles.speed
+    local v = tonumber(speedInput.Text)
+    if v and v > 0 then values.speed = v end
+    setRowActive(speedBtn, speedFrame, speedStatus, toggles.speed, "運行中", "關閉")
+    applySpeed()
+end)
+
+speedInput.FocusLost:Connect(function()
+    local v = tonumber(speedInput.Text)
+    if v and v > 0 then
+        values.speed = v
+        if toggles.speed then applySpeed() end
+    else
+        speedInput.Text = tostring(values.speed)
+    end
+end)
+
+-- ============================================================
+-- 按鈕事件：幫助分頁（固定位置）
+-- ============================================================
+fixedPosBtn.MouseButton1Click:Connect(function()
+    toggles.fixedPos = not toggles.fixedPos
+    setRowActive(fixedPosBtn, fixedPosFrame, fixedPosStatus, toggles.fixedPos, "固定中", "關閉")
+    if toggles.fixedPos then
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            values.fixedCFrame = char.HumanoidRootPart.CFrame
+        end
+        connections.fixedPos = task.spawn(function()
+            while toggles.fixedPos do
+                pcall(function()
+                    local c = player.Character
+                    if c and c:FindFirstChild("HumanoidRootPart") and values.fixedCFrame then
+                        c.HumanoidRootPart.CFrame = values.fixedCFrame
+                    end
+                end)
+                task.wait()
+            end
+        end)
+    else
+        values.fixedCFrame = nil
+        if connections.fixedPos then task.cancel(connections.fixedPos); connections.fixedPos = nil end
+    end
+end)
+
+-- ============================================================
+-- 角色重生後重新套用移速
+-- ============================================================
+player.CharacterAdded:Connect(function(newChar)
+    task.wait(0.5)
+    if toggles.speed then applySpeed(newChar) end
+end)
+
+-- ============================================================
+-- 拖曳主視窗
+-- ============================================================
+local function enableDrag(frame, dragHandle)
+    local dragging, dragStart, startPos, dragInput = false, nil, nil, nil
+    local function update(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = frame.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    dragHandle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
+end
+
+enableDrag(mainFrame, titleBar)
+
+-- ============================================================
+-- 最小化
+-- ============================================================
+local miniFrame = Instance.new("Frame")
+miniFrame.Size             = UDim2.new(0, 160, 0, 32)
+miniFrame.Position         = UDim2.new(0.5, -80, 0, 30)
+miniFrame.BackgroundColor3 = THEME.titleBg
+miniFrame.Visible          = false
+miniFrame.Parent           = screenGui
+Instance.new("UICorner", miniFrame).CornerRadius = UDim.new(0, 6)
+local miniStroke = Instance.new("UIStroke")
+miniStroke.Color     = THEME.primaryDark
+miniStroke.Thickness = 1.5
+miniStroke.Parent    = miniFrame
+local miniTitle = Instance.new("TextLabel")
+miniTitle.Text               = "霜凍腳本 v1.1"
+miniTitle.Size               = UDim2.new(1, -36, 1, 0)
+miniTitle.BackgroundTransparency = 1
+miniTitle.Font               = Enum.Font.GothamBold
+miniTitle.TextSize           = 14
+miniTitle.TextColor3         = THEME.accent
+miniTitle.Parent             = miniFrame
+local expandButton = Instance.new("TextButton")
+expandButton.Text             = "+"
+expandButton.Size             = UDim2.new(0, 24, 0, 24)
+expandButton.Position         = UDim2.new(1, -28, 0, 4)
+expandButton.BackgroundColor3 = THEME.primary
+expandButton.TextColor3       = Color3.fromRGB(255, 255, 255)
+expandButton.Parent           = miniFrame
+Instance.new("UICorner", expandButton).CornerRadius = UDim.new(0, 5)
+enableDrag(miniFrame, miniFrame)
+minimizeButton.MouseButton1Click:Connect(function() mainFrame.Visible=false; miniFrame.Visible=true end)
+expandButton.MouseButton1Click:Connect(function() miniFrame.Visible=false; mainFrame.Visible=true end)
+
+-- ============================================================
+-- 關閉
+-- ============================================================
+closeButton.MouseButton1Click:Connect(function()
+    for k, conn in pairs(connections) do
+        if conn then
+            pcall(function()
+                if type(conn) == "thread" then task.cancel(conn)
+                else conn:Disconnect() end
+            end)
+            connections[k] = nil
+        end
+    end
+    destroyManualBtn()
+    destroyCircleIndicator()
+    destroyESPPanel()
+    screenGui:Destroy()
+end)
+
+print("貓玲的霜凍腳本 v1.1 已載入！")
