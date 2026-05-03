@@ -178,7 +178,7 @@ local function createCircleIndicator()
         local hrp = char.HumanoidRootPart
 
         part.CFrame = CFrame.new(hrp.Position.X, hrp.Position.Y - 3, hrp.Position.Z)
-            * CFrame.Angles(math.rad(90), 0, 0)
+            * CFrame.Angles(0, 0, math.rad(90))
 
         local count = 0
         for _, p in ipairs(Players:GetPlayers()) do
