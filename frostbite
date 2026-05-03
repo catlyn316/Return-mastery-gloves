@@ -161,7 +161,7 @@ local function createCircleIndicator()
     local part = Instance.new("Part")
     part.Name        = "FrostCircle"
     part.Shape       = Enum.PartType.Cylinder
-    part.Size        = Vector3.new(0.3, 90, 90)
+    part.Size        = Vector3.new(90, 0.3, 90)
     part.Anchored    = true
     part.CanCollide  = false
     pcall(function() part.CanQuery = false end)
