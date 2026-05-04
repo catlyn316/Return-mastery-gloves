@@ -1007,7 +1007,7 @@ descFontInput.Parent           = descFontRow
 Instance.new("UICorner", descFontInput).CornerRadius = UDim.new(0, 5)
 
 local descTextRow = Instance.new("Frame")
-descTextRow.Size             = UDim2.new(1, 0, 0, 370)
+descTextRow.Size             = UDim2.new(1, 0, 0, 740)
 descTextRow.BackgroundColor3 = THEME.bgRow
 descTextRow.LayoutOrder      = 2
 descTextRow.Parent           = page3
@@ -1027,7 +1027,9 @@ descLabel.Text =
     "【自動使用能力】\n" ..
     "每隔設定秒數自動發動一次能力\n\n" ..
     "【自動攻擊】\n" ..
-    "每 0.8 秒對最近的玩家自動攻擊\n\n" ..
+    "需搭配【自動使用能力】才會觸發\n" ..
+    "每次能力發動後 1.5 秒補一次攻擊\n" ..
+    "不影響自動能力的間隔計時\n\n" ..
     "【移速】\n" ..
     "輸入想要的速度值後按啟動\n" ..
     "即時套用，角色重生後自動恢復\n\n" ..
@@ -1167,15 +1169,20 @@ end
 
 local function runAutoAttack()
     while toggles.autoAttack do
-        task.wait(0.8)
-        if not toggles.autoAttack then break end
-        pcall(function()
-            local nearest = getNearestTarget()
-            if nearest and nearest.Character then
-                local torso = nearest.Character:FindFirstChild("Torso")
-                if torso then ReplicatedStorage.GeneralHit:FireServer(torso) end
-            end
-        end)
+        if not toggles.autoAbility then
+            task.wait(0.5)
+        else
+            -- 等自動能力冷卻完，再延 1.5 秒補攻擊
+            task.wait(values.abilityInterval + 1.5)
+            if not toggles.autoAttack then break end
+            pcall(function()
+                local nearest = getNearestTarget()
+                if nearest and nearest.Character then
+                    local torso = nearest.Character:FindFirstChild("Torso")
+                    if torso then ReplicatedStorage.GeneralHit:FireServer(torso) end
+                end
+            end)
+        end
     end
 end
 
