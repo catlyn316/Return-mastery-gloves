@@ -1018,6 +1018,7 @@ descLabel.Size               = UDim2.new(1, -16, 1, -16)
 descLabel.Position           = UDim2.new(0, 8, 0, 8)
 descLabel.BackgroundTransparency = 1
 descLabel.Text =
+    "注意要刷小號時只能去地下室上的安全區\n" ..
     "【手動能力模式】\n" ..
     "開啟後螢幕右側出現圓形「發動」按鈕\n" ..
     "同時啟動 ESP + 面向控制面板\n" ..
