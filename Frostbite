@@ -1160,6 +1160,8 @@ end
 -- 攻擊迴圈
 -- ============================================================
 local function runAutoAbility()
+    -- 開啟時立即執行一次
+    pcall(function() ReplicatedStorage.GeneralAbility:FireServer(0.3) end)
     while toggles.autoAbility do
         task.wait(values.abilityInterval)
         if not toggles.autoAbility then break end
@@ -1168,11 +1170,23 @@ local function runAutoAbility()
 end
 
 local function runAutoAttack()
+    -- 開啟時立即執行一次（需自動能力也開啟）
+    if toggles.autoAbility then
+        task.wait(1.5)
+        if toggles.autoAttack then
+            pcall(function()
+                local nearest = getNearestTarget()
+                if nearest and nearest.Character then
+                    local torso = nearest.Character:FindFirstChild("Torso")
+                    if torso then ReplicatedStorage.GeneralHit:FireServer(torso) end
+                end
+            end)
+        end
+    end
     while toggles.autoAttack do
         if not toggles.autoAbility then
             task.wait(0.5)
         else
-            -- 等自動能力冷卻完，再延 1.5 秒補攻擊
             task.wait(values.abilityInterval + 1.5)
             if not toggles.autoAttack then break end
             pcall(function()
