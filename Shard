@@ -1,0 +1,602 @@
+-- 貓玲的冰砂腳本 v0.1
+local CoreGui = game:GetService("CoreGui")
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- 清理舊GUI
+pcall(function() if CoreGui:FindFirstChild("ShardMasterUI") then CoreGui.ShardMasterUI:Destroy() end end)
+pcall(function() if playerGui:FindFirstChild("ShardMasterUI") then playerGui.ShardMasterUI:Destroy() end end)
+pcall(function()
+    if type(gethui) == "function" then
+        local hui = gethui()
+        if hui and hui:FindFirstChild("ShardMasterUI") then hui.ShardMasterUI:Destroy() end
+    end
+end)
+
+-- ============================================================
+-- 相對化：偵測玩家靠近哪個安全區，決定流程座標偏移
+-- 第一版安全區基準：(5122, 119, 9513)
+-- 高處安全區基準：(0, 3500, 0)
+-- 原始流程座標皆以「第一版安全區」為參考撰寫
+-- ============================================================
+local SAFE_ZONE_V1  = Vector3.new(5122, 119, 9513)
+local SAFE_ZONE_HI  = Vector3.new(0,    3500, 0)
+local DETECT_RADIUS = 300  -- 偵測半徑（格）
+
+local function getSafeZoneOffset()
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then
+        return Vector3.new(0, 0, 0)
+    end
+    local pos = char.HumanoidRootPart.Position
+    if (pos - SAFE_ZONE_HI).Magnitude < DETECT_RADIUS then
+        -- 高處安全區：偏移 = 高處基準 - 第一版基準
+        return SAFE_ZONE_HI - SAFE_ZONE_V1
+    end
+    -- 預設第一版安全區，偏移為零
+    return Vector3.new(0, 0, 0)
+end
+
+local function applyOffset(v3)
+    return v3 + getSafeZoneOffset()
+end
+
+-- ============================================================
+-- 原始流程座標（以第一版安全區為基準）
+-- ============================================================
+local POS_HELP    = Vector3.new(5087, 124, 9549)  -- 幫助者固定位置
+local POS_ATTACK  = Vector3.new(5090, 124, 9546)  -- 攻擊任務站立點
+local POS_ABILITY = Vector3.new(5195, 124, 9441)  -- 射冰砂/技能點
+
+-- 變數
+local toggles = {
+    autoFarm  = false,
+    autoShoot = false,
+    helpPos   = false,
+}
+
+local connections = {
+    autoFarm  = nil,
+    autoShoot = nil,
+    helpPos   = nil,
+}
+
+-- 冰藍主題色
+local THEME = {
+    primary     = Color3.fromRGB( 90, 200, 255),
+    primaryDark = Color3.fromRGB( 50, 140, 200),
+    accent      = Color3.fromRGB(210, 240, 255),
+    bg          = Color3.fromRGB(  6,  14,  26),
+    bgPanel     = Color3.fromRGB( 10,  20,  36),
+    bgRow       = Color3.fromRGB( 16,  28,  46),
+    bgInput     = Color3.fromRGB( 22,  40,  62),
+    titleBg     = Color3.fromRGB(  8,  18,  34),
+    tabBg       = Color3.fromRGB( 18,  34,  56),
+    tabActive   = Color3.fromRGB( 30,  100, 160),
+    textMain    = Color3.fromRGB(215, 240, 255),
+    textSub     = Color3.fromRGB(150, 205, 240),
+    textMuted   = Color3.fromRGB( 85, 140, 185),
+    red         = Color3.fromRGB(200,  45,  45),
+    statusBg    = Color3.fromRGB(  6,  12,  24),
+}
+
+-- ============================================================
+-- 輔助函數
+-- ============================================================
+local function getNearestTarget()
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    local myPos = char.HumanoidRootPart.Position
+    local nearest, minDist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            local d = (p.Character.HumanoidRootPart.Position - myPos).Magnitude
+            if d < minDist then minDist = d nearest = p end
+        end
+    end
+    return nearest
+end
+
+local function faceNearest(hrp)
+    local t = getNearestTarget()
+    if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
+        local tp = t.Character.HumanoidRootPart.Position
+        hrp.CFrame = CFrame.new(hrp.Position, Vector3.new(tp.X, hrp.Position.Y, tp.Z))
+    end
+end
+
+-- ============================================================
+-- UI 建構
+-- ============================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "ShardMasterUI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+screenGui.DisplayOrder = 10001
+
+local function parentUI(g)
+    local ok = false
+    if not ok then ok = pcall(function() if type(gethui)=="function" then g.Parent=gethui() else error() end end) end
+    if not ok then ok = pcall(function() g.Parent = CoreGui end) end
+    if not ok then g.Parent = playerGui end
+end
+parentUI(screenGui)
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 280, 0, 300)
+mainFrame.Position = UDim2.new(0.5, -140, 0.5, -150)
+mainFrame.BackgroundColor3 = THEME.bg
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 10)
+
+local stroke = Instance.new("UIStroke")
+stroke.Color = THEME.primaryDark
+stroke.Thickness = 1.5
+stroke.Parent = mainFrame
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 32)
+titleBar.BackgroundColor3 = THEME.titleBg
+titleBar.Parent = mainFrame
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 10)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -60, 1, 0)
+title.BackgroundTransparency = 1
+title.Text = "貓玲的冰砂腳本"
+title.TextSize = 14
+title.Font = Enum.Font.GothamBold
+title.TextColor3 = THEME.accent
+title.Parent = titleBar
+
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 24, 0, 24)
+minimizeButton.Position = UDim2.new(1, -54, 0, 4)
+minimizeButton.BackgroundColor3 = THEME.tabActive
+minimizeButton.Text = "─"
+minimizeButton.TextColor3 = THEME.textMain
+minimizeButton.Parent = titleBar
+Instance.new("UICorner", minimizeButton).CornerRadius = UDim.new(0, 5)
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 24, 0, 24)
+closeButton.Position = UDim2.new(1, -28, 0, 4)
+closeButton.BackgroundColor3 = THEME.red
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.Parent = titleBar
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 5)
+
+local tabBar = Instance.new("Frame")
+tabBar.Size = UDim2.new(0.9, 0, 0, 28)
+tabBar.Position = UDim2.new(0.05, 0, 0, 38)
+tabBar.BackgroundColor3 = THEME.tabBg
+tabBar.Parent = mainFrame
+Instance.new("UICorner", tabBar).CornerRadius = UDim.new(0, 6)
+
+local function createTab(text, index, total)
+    local w = 1 / total
+    local tab = Instance.new("TextButton")
+    tab.Size = UDim2.new(w, -4, 1, -4)
+    tab.Position = UDim2.new((index - 1) * w, 2, 0, 2)
+    tab.BackgroundColor3 = THEME.tabBg
+    tab.Text = text
+    tab.TextSize = 12
+    tab.Font = Enum.Font.GothamBold
+    tab.TextColor3 = THEME.textMuted
+    tab.Parent = tabBar
+    Instance.new("UICorner", tab).CornerRadius = UDim.new(0, 4)
+    return tab
+end
+
+local tab1 = createTab("攻擊", 1, 3)
+local tab2 = createTab("幫助", 2, 3)
+local tab3 = createTab("說明", 3, 3)
+
+local contentContainer = Instance.new("Frame")
+contentContainer.Size = UDim2.new(0.9, 0, 0, 200)
+contentContainer.Position = UDim2.new(0.05, 0, 0, 72)
+contentContainer.BackgroundTransparency = 1
+contentContainer.ClipsDescendants = true
+contentContainer.Parent = mainFrame
+
+local function createScrollingPage(parent)
+    local page = Instance.new("ScrollingFrame")
+    page.Size = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel = 0
+    page.ScrollBarThickness = 4
+    page.ScrollBarImageColor3 = THEME.primary
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.Visible = false
+    page.Parent = parent
+    local layout = Instance.new("UIListLayout")
+    layout.Padding = UDim.new(0, 6)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.Parent = page
+    local padding = Instance.new("UIPadding")
+    padding.PaddingRight = UDim.new(0, 6)
+    padding.Parent = page
+    return page
+end
+
+local page1 = createScrollingPage(contentContainer)
+local page2 = createScrollingPage(contentContainer)
+local page3 = createScrollingPage(contentContainer)
+page1.Visible = true
+
+local function switchTab(n)
+    page1.Visible = (n == 1)
+    page2.Visible = (n == 2)
+    page3.Visible = (n == 3)
+    local tabs = {tab1, tab2, tab3}
+    for i, t in ipairs(tabs) do
+        t.BackgroundColor3 = (i == n) and THEME.tabActive or THEME.tabBg
+        t.TextColor3       = (i == n) and THEME.textMain  or THEME.textMuted
+    end
+end
+
+tab1.MouseButton1Click:Connect(function() switchTab(1) end)
+tab2.MouseButton1Click:Connect(function() switchTab(2) end)
+tab3.MouseButton1Click:Connect(function() switchTab(3) end)
+switchTab(1)
+
+-- ============================================================
+-- 共用 UI 元件
+-- ============================================================
+local function createRow(parent, labelText, statusText, btnText, order)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = THEME.bgRow
+    frame.LayoutOrder = order or 0
+    frame.Parent = parent
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 6)
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(0, 90, 1, 0)
+    label.Position = UDim2.new(0, 6, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = labelText
+    label.TextSize = 12
+    label.Font = Enum.Font.GothamBold
+    label.TextColor3 = THEME.textSub
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local status = Instance.new("TextLabel")
+    status.Size = UDim2.new(0, 65, 0, 22)
+    status.Position = UDim2.new(0, 96, 0, 5)
+    status.BackgroundTransparency = 1
+    status.Text = statusText or "關閉"
+    status.TextSize = 11
+    status.Font = Enum.Font.Gotham
+    status.TextColor3 = THEME.textMuted
+    status.TextXAlignment = Enum.TextXAlignment.Left
+    status.Parent = frame
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 50, 0, 22)
+    btn.Position = UDim2.new(1, -55, 0, 5)
+    btn.BackgroundColor3 = THEME.primary
+    btn.Text = btnText or "啟動"
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamBold
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Parent = frame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+
+    return frame, status, btn
+end
+
+-- ============================================================
+-- 頁面1：攻擊
+-- ============================================================
+local autoFarmFrame,  autoFarmStatus,  autoFarmButton  = createRow(page1, "自動解任務:", "關閉", "啟動", 1)
+local autoShootFrame, autoShootStatus, autoShootButton = createRow(page1, "自動射冰砂:", "關閉", "啟動", 2)
+
+-- ============================================================
+-- 頁面2：幫助
+-- ============================================================
+local helpPosFrame, helpPosStatus, helpPosButton = createRow(page2, "要幫的位置:", "關閉", "啟動", 1)
+
+-- ============================================================
+-- 頁面3：說明
+-- ============================================================
+local fontRow = Instance.new("Frame")
+fontRow.Size = UDim2.new(1, 0, 0, 32)
+fontRow.BackgroundColor3 = THEME.bgRow
+fontRow.LayoutOrder = 1
+fontRow.Parent = page3
+Instance.new("UICorner", fontRow).CornerRadius = UDim.new(0, 6)
+
+local fontLabel = Instance.new("TextLabel")
+fontLabel.Size = UDim2.new(0, 80, 1, 0)
+fontLabel.Position = UDim2.new(0, 6, 0, 0)
+fontLabel.BackgroundTransparency = 1
+fontLabel.Text = "字體大小:"
+fontLabel.TextSize = 12
+fontLabel.Font = Enum.Font.GothamBold
+fontLabel.TextColor3 = THEME.textSub
+fontLabel.TextXAlignment = Enum.TextXAlignment.Left
+fontLabel.TextYAlignment = Enum.TextYAlignment.Center
+fontLabel.Parent = fontRow
+
+local fontInput = Instance.new("TextBox")
+fontInput.Size = UDim2.new(0, 60, 0, 22)
+fontInput.Position = UDim2.new(0, 88, 0, 5)
+fontInput.BackgroundColor3 = THEME.bgInput
+fontInput.BorderSizePixel = 1
+fontInput.BorderColor3 = THEME.primaryDark
+fontInput.Text = "12"
+fontInput.TextSize = 12
+fontInput.Font = Enum.Font.Gotham
+fontInput.TextColor3 = THEME.textMain
+fontInput.Parent = fontRow
+Instance.new("UICorner", fontInput).CornerRadius = UDim.new(0, 5)
+
+local textRow = Instance.new("Frame")
+textRow.Size = UDim2.new(1, 0, 0, 300)
+textRow.BackgroundColor3 = THEME.bgRow
+textRow.LayoutOrder = 2
+textRow.Parent = page3
+Instance.new("UICorner", textRow).CornerRadius = UDim.new(0, 6)
+
+local explainLabel = Instance.new("TextLabel")
+explainLabel.Size = UDim2.new(1, -16, 1, -16)
+explainLabel.Position = UDim2.new(0, 8, 0, 8)
+explainLabel.BackgroundTransparency = 1
+explainLabel.Text =
+    "【相對化說明】\n" ..
+    "腳本會偵測你靠近哪個安全區\n" ..
+    "自動調整所有流程座標：\n" ..
+    "・第一版安全區 (5122, 119, 9513)\n" ..
+    "  → 偏移 (0, 0, 0)\n" ..
+    "・高處安全區 (0, 3500, 0)\n" ..
+    "  → 偏移 (-5122, +3381, -9513)\n\n" ..
+    "【攻擊分區】\n" ..
+    "自動解任務：移位→面對敵人→打\n" ..
+    "→移到技能點→射冰砂→重複\n" ..
+    "自動射冰砂：固定冷卻 7.1 秒\n" ..
+    "不受相對化影響\n\n" ..
+    "【幫助分區】\n" ..
+    "要幫的位置：持續把你固定在\n" ..
+    "幫助者座標（相對化後）"
+explainLabel.TextSize = 12
+explainLabel.Font = Enum.Font.Gotham
+explainLabel.TextColor3 = THEME.textMain
+explainLabel.TextXAlignment = Enum.TextXAlignment.Left
+explainLabel.TextYAlignment = Enum.TextYAlignment.Top
+explainLabel.TextWrapped = true
+explainLabel.LineHeight = 1.3
+explainLabel.Parent = textRow
+
+fontInput.FocusLost:Connect(function()
+    local v = tonumber(fontInput.Text)
+    v = v and math.clamp(v, 8, 24) or 12
+    fontInput.Text = tostring(v)
+    explainLabel.TextSize = v
+end)
+
+-- ============================================================
+-- 狀態標籤
+-- ============================================================
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(0.9, 0, 0, 26)
+statusLabel.Position = UDim2.new(0.05, 0, 1, -32)
+statusLabel.BackgroundColor3 = THEME.statusBg
+statusLabel.Text = "系統就緒"
+statusLabel.TextSize = 11
+statusLabel.Font = Enum.Font.GothamBold
+statusLabel.TextColor3 = THEME.primary
+statusLabel.Parent = mainFrame
+Instance.new("UICorner", statusLabel).CornerRadius = UDim.new(0, 5)
+
+local function updateStatus()
+    local active = {}
+    if toggles.autoFarm  then table.insert(active, "解任務中") end
+    if toggles.autoShoot then table.insert(active, "射冰砂中") end
+    if toggles.helpPos   then table.insert(active, "幫助中")   end
+    if #active > 0 then
+        statusLabel.Text = "✅ " .. table.concat(active, " | ")
+        statusLabel.TextColor3 = THEME.accent
+    else
+        statusLabel.Text = "系統就緒"
+        statusLabel.TextColor3 = THEME.primary
+    end
+end
+
+local function toggleUIState(btn, frame, status, isActive)
+    if isActive then
+        btn.Text = "解除"
+        btn.BackgroundColor3 = THEME.red
+        frame.BackgroundColor3 = Color3.fromRGB(10, 24, 42)
+        if status then status.Text = "運行中" status.TextColor3 = THEME.accent end
+    else
+        btn.Text = "啟動"
+        btn.BackgroundColor3 = THEME.primary
+        frame.BackgroundColor3 = THEME.bgRow
+        if status then status.Text = "關閉" status.TextColor3 = THEME.textMuted end
+    end
+    updateStatus()
+end
+
+-- ============================================================
+-- 攻擊邏輯：自動解任務
+-- ============================================================
+local function runAutoFarm()
+    while toggles.autoFarm do
+        local char = player.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then task.wait(0.2) continue end
+
+        -- 移到攻擊點，面對最近玩家
+        hrp.CFrame = CFrame.new(applyOffset(POS_ATTACK))
+        task.wait(0.3)
+        faceNearest(hrp)
+
+        -- 打第一下
+        local nearest = getNearestTarget()
+        if nearest and nearest.Character and nearest.Character:FindFirstChild("Left Arm") then
+            pcall(function()
+                ReplicatedStorage:WaitForChild("ShardHIT"):FireServer(nearest.Character:FindFirstChild("Left Arm"))
+            end)
+        end
+
+        -- 移到技能點，射冰砂
+        hrp.CFrame = CFrame.new(applyOffset(POS_ABILITY))
+        pcall(function() ReplicatedStorage:WaitForChild("Shards"):FireServer() end)
+        task.wait(1.5)
+        if not toggles.autoFarm then break end
+
+        -- 回攻擊點再打一波
+        hrp.CFrame = CFrame.new(applyOffset(POS_ATTACK))
+        task.wait(0.3)
+        faceNearest(hrp)
+
+        local nearest2 = getNearestTarget()
+        if nearest2 and nearest2.Character and nearest2.Character:FindFirstChild("Left Arm") then
+            pcall(function()
+                ReplicatedStorage:WaitForChild("ShardHIT"):FireServer(nearest2.Character:FindFirstChild("Left Arm"))
+            end)
+        end
+
+        task.wait(5.5)
+    end
+end
+
+autoFarmButton.MouseButton1Click:Connect(function()
+    toggles.autoFarm = not toggles.autoFarm
+    if toggles.autoFarm then
+        connections.autoFarm = task.spawn(runAutoFarm)
+    else
+        if connections.autoFarm then task.cancel(connections.autoFarm) connections.autoFarm = nil end
+    end
+    toggleUIState(autoFarmButton, autoFarmFrame, autoFarmStatus, toggles.autoFarm)
+end)
+
+-- ============================================================
+-- 攻擊邏輯：自動射冰砂（不受相對化影響，冷卻 7.1 秒）
+-- ============================================================
+local function runAutoShoot()
+    while toggles.autoShoot do
+        pcall(function() ReplicatedStorage:WaitForChild("Shards"):FireServer() end)
+        task.wait(7.1)
+    end
+end
+
+autoShootButton.MouseButton1Click:Connect(function()
+    toggles.autoShoot = not toggles.autoShoot
+    if toggles.autoShoot then
+        connections.autoShoot = task.spawn(runAutoShoot)
+    else
+        if connections.autoShoot then task.cancel(connections.autoShoot) connections.autoShoot = nil end
+    end
+    toggleUIState(autoShootButton, autoShootFrame, autoShootStatus, toggles.autoShoot)
+end)
+
+-- ============================================================
+-- 幫助邏輯：持續固定在幫助位置（相對化後）
+-- ============================================================
+local function runHelpPos()
+    while toggles.helpPos do
+        local char = player.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            pcall(function()
+                hrp.CFrame = CFrame.new(applyOffset(POS_HELP))
+            end)
+        end
+        task.wait(0.01)
+    end
+end
+
+helpPosButton.MouseButton1Click:Connect(function()
+    toggles.helpPos = not toggles.helpPos
+    if toggles.helpPos then
+        connections.helpPos = task.spawn(runHelpPos)
+    else
+        if connections.helpPos then task.cancel(connections.helpPos) connections.helpPos = nil end
+    end
+    toggleUIState(helpPosButton, helpPosFrame, helpPosStatus, toggles.helpPos)
+end)
+
+-- ============================================================
+-- 拖曳
+-- ============================================================
+local function enableDrag(frame, dragHandle)
+    local dragging, dragStart, startPos, dragInput = false, nil, nil, nil
+    local function update(input)
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    dragHandle.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true dragStart = input.Position startPos = frame.Position
+            input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        end
+    end)
+    dragHandle.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
+end
+
+enableDrag(mainFrame, titleBar)
+
+-- 最小化
+local miniFrame = Instance.new("Frame")
+miniFrame.Size = UDim2.new(0, 160, 0, 32)
+miniFrame.Position = UDim2.new(0.5, -80, 0, 30)
+miniFrame.BackgroundColor3 = THEME.titleBg
+miniFrame.Visible = false
+miniFrame.Parent = screenGui
+Instance.new("UICorner", miniFrame).CornerRadius = UDim.new(0, 6)
+
+local stroke2 = Instance.new("UIStroke")
+stroke2.Color = THEME.primaryDark
+stroke2.Thickness = 1.5
+stroke2.Parent = miniFrame
+
+local miniTitle = Instance.new("TextLabel")
+miniTitle.Text = "冰砂腳本"
+miniTitle.Size = UDim2.new(1, -36, 1, 0)
+miniTitle.BackgroundTransparency = 1
+miniTitle.Font = Enum.Font.GothamBold
+miniTitle.TextSize = 14
+miniTitle.TextColor3 = THEME.accent
+miniTitle.Parent = miniFrame
+
+local expandButton = Instance.new("TextButton")
+expandButton.Text = "+"
+expandButton.Size = UDim2.new(0, 24, 0, 24)
+expandButton.Position = UDim2.new(1, -28, 0, 4)
+expandButton.BackgroundColor3 = THEME.primary
+expandButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+expandButton.Parent = miniFrame
+Instance.new("UICorner", expandButton).CornerRadius = UDim.new(0, 5)
+
+enableDrag(miniFrame, miniFrame)
+
+minimizeButton.MouseButton1Click:Connect(function() mainFrame.Visible = false miniFrame.Visible = true end)
+expandButton.MouseButton1Click:Connect(function() miniFrame.Visible = false mainFrame.Visible = true end)
+
+closeButton.MouseButton1Click:Connect(function()
+    for _, conn in pairs(connections) do
+        if conn then
+            if type(conn) == "thread" then task.cancel(conn)
+            else pcall(function() conn:Disconnect() end) end
+        end
+    end
+    screenGui:Destroy()
+end)
+
+print("貓玲的冰砂腳本 v0.1 已載入!")
