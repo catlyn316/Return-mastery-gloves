@@ -1,4 +1,4 @@
--- 貓玲的冰砂腳本 v0.1
+-- 貓玲的冰砂腳本 v0.2
 local CoreGui = game:GetService("CoreGui")
 local Players = game:GetService("Players")
 local player = Players.LocalPlayer
@@ -431,15 +431,26 @@ end
 -- 攻擊邏輯：自動解任務
 -- ============================================================
 local function runAutoFarm()
+    -- 持續面向最近玩家的背景迴圈
+    local faceLoop = task.spawn(function()
+        while toggles.autoFarm do
+            local char = player.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                pcall(function() faceNearest(hrp) end)
+            end
+            task.wait(0.05)
+        end
+    end)
+
     while toggles.autoFarm do
         local char = player.Character
         local hrp  = char and char:FindFirstChild("HumanoidRootPart")
         if not hrp then task.wait(0.2) continue end
 
-        -- 移到攻擊點，面對最近玩家
+        -- 移到攻擊點
         hrp.CFrame = CFrame.new(applyOffset(POS_ATTACK))
         task.wait(0.3)
-        faceNearest(hrp)
 
         -- 打第一下
         local nearest = getNearestTarget()
@@ -458,7 +469,6 @@ local function runAutoFarm()
         -- 回攻擊點再打一波
         hrp.CFrame = CFrame.new(applyOffset(POS_ATTACK))
         task.wait(0.3)
-        faceNearest(hrp)
 
         local nearest2 = getNearestTarget()
         if nearest2 and nearest2.Character and nearest2.Character:FindFirstChild("Left Arm") then
@@ -469,6 +479,8 @@ local function runAutoFarm()
 
         task.wait(5.5)
     end
+
+    task.cancel(faceLoop)
 end
 
 autoFarmButton.MouseButton1Click:Connect(function()
