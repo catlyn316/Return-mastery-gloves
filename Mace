@@ -1,4 +1,4 @@
--- 貓玲的槌球腳本 v0.3
+-- 貓玲的槌球腳本 v0.5
 -- 灰黑主題 | 攻擊 / 幫助 / 說明 三分區
 
 local CoreGui          = game:GetService("CoreGui")
@@ -55,7 +55,7 @@ local toggles = {
 
 local values = {
     spinMode        = "正常轉",         -- "正常轉" | "間隔轉"
-    helpDistance    = 5,
+    helpDistance    = 15,
     helpMode        = "被打後不重置",   -- "被打後不重置" | "被打後重置"
     targetPlayer    = nil,
     fixedCFrame     = nil,
@@ -431,7 +431,7 @@ parentUI(screenGui)
 -- 主框架
 local mainFrame = Instance.new("Frame")
 mainFrame.Size             = UDim2.new(0, 300, 0, 320)
-mainFrame.Position         = UDim2.new(0.5, -150, 0.5, -160)
+mainFrame.Position         = UDim2.new(1, -320, 0, 40)
 mainFrame.BackgroundColor3 = THEME.bg
 mainFrame.BorderSizePixel  = 0
 mainFrame.Parent           = screenGui
@@ -870,7 +870,7 @@ helpTgtInfo.TextWrapped       = true
 helpTgtInfo.Parent            = helpTgtFrame
 
 -- 設定距離
-local helpDistFrame, helpDistInput = makeInputRow(pageHelp, "設定距離:", "5", "格", 80, 2)
+local helpDistFrame, helpDistInput = makeInputRow(pageHelp, "設定距離:", "15", "格", 80, 2)
 
 -- ▼ 幫助模式切換（被打後不重置 / 被打後重置）
 local helpModeFrame, helpModeBtn = makeWideRow(
@@ -948,53 +948,49 @@ end
 
 -- ============================================================
 -- 幫助者位置保持：被打後重置（僅目標打才重置）
---   判定：ragdoll = true 時檢查 LastSlappedBy == 目標名字
+--   判定：監聽 LastSlappedBy.Changed，一更新就立刻比對目標名字
+--   不需要等 ragdoll，被打一次即時觸發
 -- ============================================================
 local function runHelpLoopRagdollReset(hrp, hum, tgt)
-    local ragdolledObj = nil
+    local shouldReset = false
+    local lsbConn     = nil
+
+    -- 取得 LastSlappedBy 物件
+    local lsbObj = nil
     pcall(function()
         local folder = Workspace:FindFirstChild(player.Name)
-        if folder then ragdolledObj = folder:FindFirstChild("Ragdolled") end
+        if folder then lsbObj = folder:FindFirstChild("LastSlappedBy") end
     end)
 
-    local shouldReset    = false
-    local ragdollConn    = nil
-
-    local function onRagdolled(val)
-        if val ~= true then return end
-        -- 檢查 LastSlappedBy 是否等於目標玩家名字
-        local slappedBy = getLastSlappedBy()
-        if slappedBy == tgt.Name or slappedBy == tgt.DisplayName then
-            shouldReset = true
-        end
-        -- 不是目標打的 → 不重置，繼續保持位置
+    local function setupLSBConn()
+        if lsbConn then pcall(function() lsbConn:Disconnect() end) end
+        if not lsbObj or not lsbObj.Parent then return end
+        lsbConn = lsbObj.Changed:Connect(function(newVal)
+            -- LastSlappedBy 一更新就立即比對目標名字
+            if newVal == tgt.Name or newVal == tgt.DisplayName then
+                shouldReset = true
+            end
+        end)
     end
 
-    local function setupConn()
-        if ragdollConn then pcall(function() ragdollConn:Disconnect() end) end
-        if not ragdolledObj or not ragdolledObj.Parent then return end
-        ragdollConn = ragdolledObj.Changed:Connect(onRagdolled)
-    end
-
-    setupConn()
+    setupLSBConn()
 
     while toggles.helpTarget do
         if not (hrp and hrp.Parent) then break end
         if hum.Health <= 0 then break end
 
-        -- 若 ragdolledObj 丟失，嘗試重新取得
-        if not ragdolledObj or not ragdolledObj.Parent then
+        -- 若 lsbObj 丟失，嘗試重新取得並重連
+        if not lsbObj or not lsbObj.Parent then
             pcall(function()
                 local folder = Workspace:FindFirstChild(player.Name)
-                if folder then ragdolledObj = folder:FindFirstChild("Ragdolled") end
+                if folder then lsbObj = folder:FindFirstChild("LastSlappedBy") end
             end)
-            setupConn()
+            setupLSBConn()
         end
 
         if shouldReset then
             shouldReset = false
-            if ragdollConn then pcall(function() ragdollConn:Disconnect() end) end
-            task.wait(0.1)
+            if lsbConn then pcall(function() lsbConn:Disconnect() end) end
             pcall(function() player.Reset:FireServer() end)
             task.wait(0.1)
             break  -- 本輪結束，外層迴圈會重新傳送
@@ -1015,7 +1011,7 @@ local function runHelpLoopRagdollReset(hrp, hum, tgt)
         task.wait(0.05)
     end
 
-    if ragdollConn then pcall(function() ragdollConn:Disconnect() end) end
+    if lsbConn then pcall(function() lsbConn:Disconnect() end) end
 end
 
 -- ============================================================
@@ -1235,7 +1231,10 @@ infoText.Text =
     "• 幫助模式「被打後重置」：被打時檢查 LastSlappedBy\n" ..
     "   → 若是目標打的才重置；其他玩家打不重置，繼續保持\n\n" ..
     "📝 其他\n" ..
-    "• ─ 可最小化視窗，X 可關閉腳本"
+    "• ─ 可最小化視窗，X 可關閉腳本\n" ..
+    "• ─ 殺人數的任務是在目標死前你打了他多少下，所以你完全可以打小號250次再讓小號重置\n" ..
+    "• ─ 傳送前記得先收手套，不然你會被拖到\n" ..
+    "• ─ 有bug再跟貓玲說"
 infoText.TextSize          = 12
 infoText.Font              = Enum.Font.Gotham
 infoText.TextColor3        = THEME.textMain
@@ -1356,4 +1355,4 @@ end)
 -- ============================================================
 -- 初始化完成
 -- ============================================================
-print("貓玲的槌球腳本 v0.3 已載入！")
+print("貓玲的槌球腳本 v0.5 已載入！")
